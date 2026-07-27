@@ -500,7 +500,7 @@ export default function CashRegisterScreen({ navigation }) {
           </Card.Content>
         </Card>
 
-        {/* Registrar Vale / Sangria */}
+        {/* Registrar Vale / Sangria
         <Card style={styles.formCard}>
           <Card.Title
             title="Registrar Vale / Sangria"
@@ -572,7 +572,7 @@ export default function CashRegisterScreen({ navigation }) {
               Registrar Vale
             </Button>
           </Card.Content>
-        </Card>
+        </Card> */}
 
         {/* Navegação de Mês */}
         <View style={styles.monthNav}>
