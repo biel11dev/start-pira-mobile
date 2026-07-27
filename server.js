@@ -1,0 +1,2398 @@
+require("dotenv").config();
+const express = require("express");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const cors = require("cors");
+const helmet = require("helmet");
+const morgan = require("morgan");
+const { PrismaClient } = require("@prisma/client");
+const { format, parse } = require("date-fns");
+const nodemailer = require("nodemailer");
+const prisma = new PrismaClient();
+const app = express();
+const port = 3000;
+const SECRET_KEY = process.env.SECRET_KEY || "2a51f0c6b96167b01f59b41aa2407066735cc39ee71ebd041d8ff59b75c60c15";
+const path = require("path");
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        connectSrc: ["'self'", "https://api-start-pira.vercel.app"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:"],
+      },
+    },
+  })
+);
+app.use(cors());
+app.use(express.json());
+app.use(morgan("dev"));
+
+// Health check route
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "ok", message: "API está funcionando" });
+});
+
+// Middleware de autenticação
+const authenticate = (req, res, next) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).json({ error: "Token não fornecido" });
+
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    req.userId = decoded.userId;
+    next();
+  } catch {
+    res.status(401).json({ error: "Token inválido" });
+  }
+};
+
+async function sendResetEmail(email, token) {
+  const transporter = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false,
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
+
+  const resetLink = `https://start-pira-ftd.vercel.app/reset-password?token=${token}`;
+
+  const mailOptions = {
+    from: '"Start Pira" <startpira01@gmail.com>',
+    to: email,
+    subject: "Redefinição de Senha - Start Pira",
+    text: `Olá,
+
+Você solicitou a redefinição de sua senha. Use o link abaixo para redefini-la:
+
+${resetLink}
+
+Se você não solicitou isso, ignore este e-mail.
+
+Atenciosamente,
+Equipe Start Pira`,
+    html: `<p>Olá,</p>
+           <p>Você solicitou a redefinição de sua senha. Use o link abaixo para redefini-la:</p>
+           <a href="${resetLink}">Redefinir Senha</a>
+           <p>Se você não solicitou isso, ignore este e-mail.</p>
+           <p>Atenciosamente,<br>Equipe Start Pira</p>`,
+  };
+
+  await transporter.sendMail(mailOptions);
+  console.log(`E-mail de redefinição enviado para ${email}`);
+}
+
+// ROTAS DE AUTENTICAÇÃO
+app.post("/api/register", async (req, res) => {
+  const { username, password, name } = req.body;
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = await prisma.user.create({ data: { username, password: hashedPassword, name: name || null } });
+    res.json(newUser);
+  } catch (error) {
+    console.log("Dados recebidos:", req.body); // Log dos dados recebidos
+    res.status(400).json({ error: "Erro ao registrar usuário", details: error.message });
+  }
+});
+
+app.get("/api/users", async (req, res) => {
+  try {
+    const users = await prisma.user.findMany();
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar usuários", details: error.message });
+  }
+});
+
+app.post("/api/login", async (req, res) => {
+  try {
+    console.log("📱 [LOGIN] Requisição recebida:", { username: req.body.username });
+    
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      console.log("❌ [LOGIN] Campos obrigatórios ausentes");
+      return res.status(400).json({ error: "Username e password são obrigatórios" });
+    }
+
+    console.log("🔍 [LOGIN] Buscando usuário no banco...");
+    const user = await prisma.user.findUnique({ 
+      where: { username },
+      select: {
+        id: true,
+        username: true,
+        password: true,
+        name: true,
+        caixa: true,
+        produtos: true,
+        maquinas: true,
+        fiado: true,
+        despesas: true,
+        ponto: true,
+        acessos: true,
+        base_produto: true,
+        pdv: true,
+        pessoal: true,
+      }
+    });
+
+    if (!user) {
+      console.log("❌ [LOGIN] Usuário não encontrado:", username);
+      return res.status(401).json({ error: "Usuário ou senha inválidos" });
+    }
+
+    console.log("🔐 [LOGIN] Verificando senha...");
+    const passwordMatch = await bcrypt.compare(password, user.password);
+    
+    if (!passwordMatch) {
+      console.log("❌ [LOGIN] Senha incorreta para usuário:", username);
+      return res.status(401).json({ error: "Usuário ou senha inválidos" });
+    }
+
+    console.log("✅ [LOGIN] Autenticação bem-sucedida. Gerando token...");
+    const token = jwt.sign({ userId: user.id }, SECRET_KEY, { expiresIn: "1h" });
+    
+    const response = {
+      token,
+      user: {
+        username: user.username,
+        name: user.name,
+        permissions: {
+          caixa: user.caixa,
+          produtos: user.produtos,
+          maquinas: user.maquinas,
+          fiado: user.fiado,
+          despesas: user.despesas,
+          ponto: user.ponto,
+          acessos: user.acessos,
+          base_produto: user.base_produto,
+          pdv: user.pdv,
+          pessoal: user.pessoal,
+        },
+      }
+    };
+
+    console.log("✅ [LOGIN] Resposta enviada com sucesso");
+    res.json(response);
+  } catch (error) {
+    console.error("💥 [LOGIN] Erro no processamento:", error);
+    res.status(500).json({ 
+      error: "Erro ao processar login",
+      message: error.message 
+    });
+  }
+});
+
+app.put("/api/users/:id", async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    const { name, caixa, produtos, maquinas, fiado, despesas, ponto, acessos, base_produto, pdv } = req.body;
+
+    const updateData = { caixa, produtos, maquinas, fiado, despesas, ponto, acessos, base_produto, pdv };
+    if (name !== undefined) updateData.name = name;
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+    });
+
+    res.json(updatedUser);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao atualizar permissões do usuário", details: error.message });
+  }
+});
+
+// ROTAS DE CLIENTES
+app.get("/api/clients", async (req, res) => res.json(await prisma.client.findMany()));
+
+app.get("/api/clients/:id", async (req, res) => {
+  try {
+    const client = await prisma.client.findUnique({
+      where: { id: parseInt(req.params.id) },
+      include: {
+        Purchase: true,
+        Payment: true,
+      },
+    });
+    if (!client) {
+      return res.status(404).json({ error: "Cliente não encontrado" });
+    }
+    res.json(client);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar cliente", details: error.message });
+  }
+});
+
+app.post("/api/clients", async (req, res) => res.json(await prisma.client.create({ data: req.body })));
+
+app.put("/api/clients/:id", async (req, res) => {
+  res.json(await prisma.client.update({ where: { id: parseInt(req.params.id) }, data: req.body }));
+});
+
+app.delete("/api/clients/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "ID inválido" });
+    }
+
+    await prisma.client.delete({ where: { id } });
+    res.json({ message: "Cliente excluído com sucesso" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir cliente", details: error.message });
+  }
+});
+
+// ROTAS DE MÁQUINAS
+app.get("/api/machines", async (req, res) => res.json(await prisma.machine.findMany()));
+
+app.get("/api/machines/:id", async (req, res) => {
+  const machine = await prisma.machine.findUnique({
+    where: { id: parseInt(req.params.id) },
+    include: { DailyReading: true },
+  });
+
+  if (machine) {
+    // Formata o campo `date` de cada leitura diária
+    machine.DailyReading = machine.DailyReading.map((reading) => ({
+      ...reading,
+      date: format(parse(reading.date, "dd-MM-yyyy", new Date()), "dd-MM-yyyy"),
+    }));
+  }
+
+  res.json(machine || { error: "Máquina não encontrada" });
+});
+
+app.post("/api/machines", async (req, res) => res.json(await prisma.machine.create({ data: req.body })));
+
+app.put("/api/machines/:id", async (req, res) => {
+  res.json(await prisma.machine.update({ where: { id: parseInt(req.params.id) }, data: req.body }));
+});
+
+app.delete("/api/machines/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "ID inválido" });
+    }
+
+    await prisma.machine.delete({ where: { id } });
+    res.json({ message: "Máquina excluída com sucesso" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir máquina", details: error.message });
+  }
+});
+
+// ROTAS DE COMPRAS (PURCHASES)
+app.get("/api/purchases", async (req, res) => res.json(await prisma.purchase.findMany()));
+
+app.get("/api/purchases/:id", async (req, res) => {
+  const purchase = await prisma.purchase.findUnique({
+    where: { id: parseInt(req.params.id) },
+  });
+  res.json(purchase || { error: "Compra não encontrada" });
+});
+
+app.post("/api/purchases", async (req, res) => {
+  try {
+    const { product, quantity, total, date, clientId } = req.body;
+
+    // Converter quantity para um número inteiro
+    const parsedQuantity = parseInt(quantity, 10);
+    if (isNaN(parsedQuantity)) {
+      return res.status(400).json({ error: "Quantidade deve ser um número válido." });
+    }
+
+    const newPurchase = await prisma.purchase.create({
+      data: { product, quantity: parsedQuantity, total, date, clientId },
+    });
+
+    res.status(201).json(newPurchase);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao criar compra", details: error.message });
+  }
+});
+
+app.put("/api/purchases/:id", async (req, res) => {
+  try {
+    const { product, quantity, total, date, clientId } = req.body;
+
+    // Converter quantity para um número inteiro
+    const parsedQuantity = parseInt(quantity, 10);
+    if (isNaN(parsedQuantity)) {
+      return res.status(400).json({ error: "Quantidade deve ser um número válido." });
+    }
+
+    const updatedPurchase = await prisma.purchase.update({
+      where: { id: parseInt(req.params.id) },
+      data: { product, quantity: parsedQuantity, total, date, clientId },
+    });
+
+    res.json(updatedPurchase);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao atualizar compra", details: error.message });
+  }
+});
+
+app.delete("/api/purchases/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "ID inválido" });
+    }
+
+    await prisma.purchase.delete({ where: { id } });
+    res.json({ message: "Compra excluída com sucesso" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir compra", details: error.message });
+  }
+});
+
+// ROTAS DE PAGAMENTOS
+app.get("/api/payments", async (req, res) => res.json(await prisma.payment.findMany()));
+
+app.get("/api/payments/:id", async (req, res) => {
+  const payment = await prisma.payment.findUnique({
+    where: { id: parseInt(req.params.id) },
+  });
+  res.json(payment || { error: "Pagamento não encontrado" });
+});
+
+app.post("/api/payments", async (req, res) => res.json(await prisma.payment.create({ data: req.body })));
+
+app.put("/api/payments/:id", async (req, res) => {
+  try {
+    const { amount, date, clientId } = req.body;
+
+    const formattedDate = new Date(date).toISOString();
+
+    const updatedPayment = await prisma.payment.update({
+      where: { id: parseInt(req.params.id) },
+      data: { amount, date: formattedDate, clientId },
+    });
+
+    res.json(updatedPayment);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao atualizar pagamento", details: error.message });
+  }
+});
+
+app.delete("/api/payments/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "ID inválido" });
+    }
+
+    await prisma.payment.delete({ where: { id } });
+    res.json({ message: "Pagamento excluído com sucesso" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir pagamento", details: error.message });
+  }
+});
+
+// ROTAS DE LEITURAS DIÁRIAS
+app.get("/api/daily-readings", async (req, res) => {
+  const { machineId, date } = req.query;
+
+  let whereClause = {
+    machineId: parseInt(machineId),
+  };
+
+  if (date) {
+    // Parse a data de entrada e formate-a como "dd-MM-yyyy"
+    whereClause.date = { contains: date };
+  }
+
+  try {
+    const dailyReadings = await prisma.dailyReading.findMany({
+      where: whereClause,
+    });
+    res.json(dailyReadings);
+  } catch (error) {
+    console.error("Erro ao buscar leituras diárias:", error);
+    res.status(500).json({ message: "Erro ao buscar leituras diárias" });
+  }
+});
+
+app.get("/api/daily-readings/:id", async (req, res) => {
+  const dailyReading = await prisma.dailyReading.findUnique({
+    where: { id: parseInt(req.params.id) },
+  });
+  res.json(dailyReading || { error: "Leitura diária não encontrada" });
+});
+
+app.post("/api/daily-readings", async (req, res) => {
+  const { date, value, machineId } = req.body;
+  res.json(await prisma.dailyReading.create({ data: { date: date, value, machineId } }));
+});
+
+app.put("/api/daily-readings/:id", async (req, res) => {
+  try {
+    const { date, value, machineId } = req.body;
+    const formattedDate = format(date, "dd-MM-yyyy"); // Formata a data para "dd-MM-yyyy"
+
+    const updatedDailyReading = await prisma.dailyReading.update({
+      where: { id: parseInt(req.params.id) },
+      data: { date: formattedDate, value, machineId },
+    });
+
+    res.json(updatedDailyReading);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao atualizar leitura diária", details: error.message });
+  }
+});
+
+app.delete("/api/daily-readings/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "ID inválido" });
+    }
+
+    await prisma.dailyReading.delete({ where: { id } });
+    res.json({ message: "Leitura diária excluída com sucesso" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir leitura diária", details: error.message });
+  }
+});
+
+// ROTAS DE PRODUTOS (CORREÇÃO DO ERRO `quantity`)
+app.get("/api/estoque_prod", async (req, res) => res.json(await prisma.estoque.findMany()));
+
+app.get("/api/estoque_prod/:id", async (req, res) => {
+  const product = await prisma.estoque.findUnique({
+    where: { id: parseInt(req.params.id) },
+  });
+  res.json(product || { error: "Produto não encontrado" });
+});
+
+app.post("/api/estoque_prod", async (req, res) => {
+  try {
+    const { name, quantity, unit, value, valuecusto } = req.body;
+
+    if (!name || !quantity || !unit) {
+      return res.status(400).json({ error: "Todos os campos são obrigatórios." });
+    }
+
+    const parsedQuantity = parseInt(quantity, 10);
+    if (isNaN(parsedQuantity)) {
+      return res.status(400).json({ error: "Quantidade deve ser um número válido." });
+    }
+
+    const parsedValue = parseFloat(value, 10);
+    if (isNaN(parsedValue)) {
+      return res.status(400).json({ error: "Valor deve ser um número válido." });
+    }
+
+    const parsedValueCusto = parseFloat(valuecusto, 10);
+    if (isNaN(parsedValueCusto)) {
+      return res.status(400).json({ error: "Custo deve ser um número válido." });
+    }
+
+    const newProduct = await prisma.estoque.create({
+      data: { name, quantity: parsedQuantity, unit, value: parsedValue, valuecusto: parsedValueCusto },
+    });
+
+    res.status(201).json(newProduct);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao criar produto", details: error.message });
+  }
+});
+
+app.put("/api/estoque_prod/:id", async (req, res) => {
+  try {
+    const { name, quantity, unit, value, valuecusto } = req.body;
+
+    if (!name || !quantity || !unit) {
+      return res.status(400).json({ error: "Todos os campos são obrigatórios." });
+    }
+
+    const parsedQuantity = parseInt(quantity, 10);
+    if (isNaN(parsedQuantity)) {
+      return res.status(400).json({ error: "Quantidade deve ser um número válido." });
+    }
+
+    const parsedValue = parseFloat(value, 10);
+    if (isNaN(parsedValue)) {
+      return res.status(400).json({ error: "Valor deve ser um número válido." });
+    }
+
+    const parsedValueCusto = parseFloat(valuecusto, 10);
+    if (isNaN(parsedValueCusto)) {
+      return res.status(400).json({ error: "Custo deve ser um número válido." });
+    }
+
+    const updatedProduct = await prisma.estoque.update({
+      where: { id: parseInt(req.params.id) },
+      data: { name, quantity: parsedQuantity, unit, value: parsedValue, valuecusto: parsedValueCusto },
+    });
+
+    res.json(updatedProduct);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao atualizar produto", details: error.message });
+  }
+});
+
+app.delete("/api/estoque_prod/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "ID inválido" });
+    }
+
+    await prisma.estoque.delete({ where: { id } });
+    res.json({ message: "Produto excluído com sucesso" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir produto", details: error.message });
+  }
+});
+// ROTAS DE PRODUTOS (CORREÇÃO DO ERRO `quantity`)
+app.get("/api/products", async (req, res) => {
+  try {
+    const products = await prisma.product.findMany({
+      include: { 
+        category: {
+          include: {
+            parent: true
+          }
+        }
+      }
+    });
+    res.json(products);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar produtos", details: error.message });
+  }
+});
+
+app.get("/api/products/:id", async (req, res) => {
+  try {
+    const product = await prisma.product.findUnique({
+      where: { id: parseInt(req.params.id) },
+      include: { 
+        category: {
+          include: {
+            parent: true
+          }
+        }
+      }
+    });
+    res.json(product || { error: "Produto não encontrado" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar produto", details: error.message });
+  }
+});
+
+// Atualizar POST e PUT de produtos para incluir categoria com parent no retorno
+app.post("/api/products", async (req, res) => {
+  try {
+    const { name, quantity, unit, value, valuecusto, categoryId } = req.body;
+
+    if (!name || !quantity || !unit) {
+      return res.status(400).json({ error: "Todos os campos são obrigatórios." });
+    }
+
+    const parsedQuantity = parseInt(quantity, 10);
+    if (isNaN(parsedQuantity)) {
+      return res.status(400).json({ error: "Quantidade deve ser um número válido." });
+    }
+
+    const parsedValue = parseFloat(value, 10);
+    if (isNaN(parsedValue)) {
+      return res.status(400).json({ error: "Valor deve ser um número válido." });
+    }
+
+    const parsedValueCusto = parseFloat(valuecusto, 10);
+    if (isNaN(parsedValueCusto)) {
+      return res.status(400).json({ error: "Custo deve ser um número válido." });
+    }
+
+    const newProduct = await prisma.product.create({
+      data: { 
+        name, 
+        quantity: parsedQuantity, 
+        unit, 
+        value: parsedValue, 
+        valuecusto: parsedValueCusto,
+        categoryId: categoryId || null
+      },
+      include: { 
+        category: {
+          include: {
+            parent: true
+          }
+        }
+      }
+    });
+
+    res.status(201).json(newProduct);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao criar produto", details: error.message });
+  }
+});
+
+app.put("/api/products/:id", async (req, res) => {
+  try {
+    const { name, quantity, unit, value, valuecusto, categoryId } = req.body;
+
+    if (!name || !quantity || !unit) {
+      return res.status(400).json({ error: "Todos os campos são obrigatórios." });
+    }
+
+    const parsedQuantity = parseInt(quantity, 10);
+    if (isNaN(parsedQuantity)) {
+      return res.status(400).json({ error: "Quantidade deve ser um número válido." });
+    }
+
+    const parsedValue = parseFloat(value, 10);
+    if (isNaN(parsedValue)) {
+      return res.status(400).json({ error: "Valor deve ser um número válido." });
+    }
+
+    const parsedValueCusto = parseFloat(valuecusto, 10);
+    if (isNaN(parsedValueCusto)) {
+      return res.status(400).json({ error: "Custo deve ser um número válido." });
+    }
+
+    const updatedProduct = await prisma.product.update({
+      where: { id: parseInt(req.params.id) },
+      data: { 
+        name, 
+        quantity: parsedQuantity, 
+        unit, 
+        value: parsedValue, 
+        valuecusto: parsedValueCusto,
+        categoryId: categoryId || null
+      },
+      include: { 
+        category: {
+          include: {
+            parent: true
+          }
+        }
+      }
+    });
+
+    res.json(updatedProduct);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao atualizar produto", details: error.message });
+  }
+});
+
+app.delete("/api/products/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "ID inválido" });
+    }
+
+    await prisma.product.delete({ where: { id } });
+    res.json({ message: "Produto excluído com sucesso" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir produto", details: error.message });
+  }
+});
+
+// ROTAS DE BALANÇO
+app.get("/api/balances", async (req, res) => res.json(await prisma.balance.findMany()));
+
+app.get("/api/balances/:id", async (req, res) => {
+  const balance = await prisma.balance.findUnique({
+    where: { id: parseInt(req.params.id) },
+  });
+  res.json(balance || { error: "Saldo não encontrado" });
+});
+
+app.post("/api/balances", async (req, res) => {
+  const { date, balance, cartao, dinheiro } = req.body;
+  res.json(await prisma.balance.create({ data: { date, balance, cartao, dinheiro } }));
+});
+
+app.put("/api/balances/:id", async (req, res) => {
+  res.json(await prisma.balance.update({ where: { id: parseInt(req.params.id) }, data: req.body }));
+});
+
+app.delete("/api/balances/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "ID inválido" });
+    }
+
+    await prisma.balance.delete({ where: { id } });
+    res.json({ message: "Saldo excluído com sucesso" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir saldo", details: error.message });
+  }
+});
+
+// ROTAS DE DESPESAS
+app.get("/api/despesas", async (req, res) => {
+  try {
+    const despesas = await prisma.despesa.findMany();
+    res.json(despesas);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar despesas", details: error.message });
+  }
+});
+
+app.get("/api/despesas/:id", async (req, res) => {
+  try {
+    const despesa = await prisma.despesa.findUnique({
+      where: { id: parseInt(req.params.id) },
+    });
+    res.json(despesa || { error: "Despesa não encontrada" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar despesa", details: error.message });
+  }
+});
+
+app.post("/api/despesas", async (req, res) => {
+  try {
+    const { nomeDespesa, valorDespesa, descDespesa, date, DespesaFixa } = req.body;
+    console.log("Dados recebidos:", req.body); // Log dos dados recebidos
+
+    // Construir dinamicamente o objeto data
+    const parsedDate = new Date(date.replace(" ", "T"));
+
+    const data = { nomeDespesa, date: parsedDate, DespesaFixa };
+    if (valorDespesa !== undefined) data.valorDespesa = valorDespesa;
+    if (descDespesa !== undefined) data.descDespesa = descDespesa;
+
+    const newDespesa = await prisma.despesa.create({
+      data,
+    });
+    res.status(201).json(newDespesa);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao criar despesa", details: error.message });
+  }
+});
+
+app.put("/api/despesas/:id", async (req, res) => {
+  try {
+    const { nomeDespesa, valorDespesa, descDespesa } = req.body;
+    
+    // Criar objeto de dados dinamicamente apenas com campos não nulos
+    const updateData = {};
+    
+    if (nomeDespesa !== null && nomeDespesa !== undefined) {
+      updateData.nomeDespesa = nomeDespesa;
+    }
+    
+    if (valorDespesa !== null && valorDespesa !== undefined) {
+      updateData.valorDespesa = valorDespesa;
+    }
+    
+    if (descDespesa !== null && descDespesa !== undefined) {
+      updateData.descDespesa = descDespesa;
+    }
+    
+    const updatedDespesa = await prisma.despesa.update({
+      where: { id: parseInt(req.params.id) },
+      data: updateData,
+    });
+    
+    res.json(updatedDespesa);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao atualizar despesa", details: error.message });
+  }
+});
+
+app.delete("/api/despesas/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "ID inválido" });
+    }
+
+    await prisma.despesa.delete({ where: { id } });
+    res.json({ message: "Despesa excluída com sucesso" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir despesa", details: error.message });
+  }
+});
+
+// ROTAS DE FUNCIONÁRIOS
+app.get("/api/employees", async (req, res) => {
+  try {
+    const employees = await prisma.employee.findMany({
+      include: { points: true }, // Inclui os pontos diários relacionados
+    });
+
+    // Adiciona valores padrão para campos se estiverem null
+    const employeesWithDefaults = employees.map((employee) => ({
+      ...employee,
+      carga: employee.carga || 8,
+      valorHora: employee.valorHora || 0,
+      metaHoras: employee.metaHoras || null,
+      bonificacao: employee.bonificacao || null,
+      contato: employee.contato || null,
+      dataEntrada: employee.dataEntrada || null,
+      ativo: employee.ativo !== undefined ? employee.ativo : true,
+    }));
+
+    res.json(employeesWithDefaults);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar funcionários", details: error.message });
+  }
+});
+
+app.get("/api/employees/:id", async (req, res) => {
+  try {
+    const employee = await prisma.employee.findUnique({
+      where: { id: parseInt(req.params.id) },
+      include: { points: true }, // Inclui os pontos diários relacionados
+    });
+    if (!employee) {
+      return res.status(404).json({ error: "Funcionário não encontrado" });
+    }
+    res.json(employee);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar funcionário", details: error.message });
+  }
+});
+
+app.post("/api/employees", async (req, res) => {
+  try {
+    const { 
+      name, 
+      position, 
+      carga = 8,
+      valorHora = 0, 
+      metaHoras = null, 
+      bonificacao = null,
+      contato = null,
+      dataEntrada = null,
+      ativo = true
+    } = req.body;
+    
+    const newEmployee = await prisma.employee.create({
+      data: { 
+        name, 
+        position,
+        carga: parseInt(carga) || 8,
+        valorHora: parseFloat(valorHora) || 0,
+        metaHoras: metaHoras ? parseFloat(metaHoras) : null,
+        bonificacao: bonificacao ? parseFloat(bonificacao) : null,
+        contato,
+        dataEntrada: dataEntrada ? new Date(dataEntrada) : null,
+        ativo
+      },
+    });
+    res.status(201).json(newEmployee);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao criar funcionário", details: error.message });
+  }
+});
+
+app.put("/api/employees/:id", async (req, res) => {
+  try {
+    const { 
+      name, 
+      position,
+      carga,
+      valorHora, 
+      metaHoras, 
+      bonificacao,
+      contato,
+      dataEntrada,
+      ativo
+    } = req.body;
+    
+    // Construir objeto de atualização dinamicamente
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+    if (position !== undefined) updateData.position = position;
+    if (carga !== undefined) updateData.carga = parseInt(carga) || 8;
+    if (valorHora !== undefined) updateData.valorHora = parseFloat(valorHora) || 0;
+    if (metaHoras !== undefined) updateData.metaHoras = metaHoras ? parseFloat(metaHoras) : null;
+    if (bonificacao !== undefined) updateData.bonificacao = bonificacao ? parseFloat(bonificacao) : null;
+    if (contato !== undefined) updateData.contato = contato;
+    if (dataEntrada !== undefined) updateData.dataEntrada = dataEntrada ? new Date(dataEntrada) : null;
+    if (ativo !== undefined) updateData.ativo = ativo;
+    
+    const updatedEmployee = await prisma.employee.update({
+      where: { id: parseInt(req.params.id) },
+      data: updateData,
+    });
+    res.json(updatedEmployee);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao atualizar funcionário", details: error.message });
+  }
+});
+
+app.delete("/api/employees/:id", async (req, res) => {
+  try {
+    await prisma.employee.delete({
+      where: { id: parseInt(req.params.id) },
+    });
+    res.json({ message: "Funcionário excluído com sucesso" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir funcionário", details: error.message });
+  }
+});
+
+// ROTAS DE PONTOS DIÁRIOS
+app.get("/api/daily-points", async (req, res) => {
+  try {
+    const { employeeId, date } = req.query;
+
+    let where = {};
+    if (employeeId) {
+      where.employeeId = parseInt(employeeId);
+    }
+
+    if (date) {
+      // Verifica se a data está no formato "YYYY-MM"
+
+      const [year, month] = date.split("-");
+      const startDate = new Date(`${year}-${month}-01T00:00:00.000Z`);
+      // Pega o primeiro dia do mês seguinte
+      const endDate = new Date(startDate);
+      endDate.setMonth(endDate.getMonth() + 1);
+
+      where.date = {
+        gte: startDate,
+        lt: endDate,
+      };
+    }
+
+    const points = await prisma.dailyPoint.findMany({
+      where,
+      include: { employee: true },
+    });
+    res.json(points);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar pontos diários", details: error.message });
+  }
+});
+
+app.get("/api/daily-points/:id", async (req, res) => {
+  try {
+    const employeeId = parseInt(req.params.id);
+    const { date } = req.query;
+    const usedDate = date ? new Date(date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
+
+    const point = await prisma.dailyPoint.findFirst({
+      where: {
+        employeeId,
+        date: {
+          gte: new Date(`${usedDate}T00:00:00.000Z`),
+          lt: new Date(`${usedDate}T23:59:59.999Z`),
+        },
+      },
+      include: { employee: true },
+    });
+    if (!point) {
+      return res.json(null);
+    }
+    res.json(point);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar ponto diário", details: error.message });
+  }
+});
+
+app.post("/api/daily-points", async (req, res) => {
+  try {
+    const { date, entry, exit, gateOpen, employeeId } = req.body;
+
+    // Função para combinar data e hora
+    const combineDateAndTime = (dateStr, timeStr) => {
+      if (!dateStr || !timeStr) return null;
+      return new Date(`${dateStr}T${timeStr}:00.000Z`);
+    };
+
+    const entryDateTime = combineDateAndTime(date, entry);
+    const exitDateTime = combineDateAndTime(date, exit);
+    const gateOpenDateTime = combineDateAndTime(date, gateOpen);
+
+    const newPoint = await prisma.dailyPoint.create({
+      data: {
+        date: new Date(date),
+        entry: entryDateTime,
+        exit: exitDateTime,
+        gateOpen: gateOpenDateTime,
+        employeeId,
+      },
+    });
+    res.status(201).json(newPoint);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao criar ponto diário", details: error.message });
+  }
+});
+
+app.put("/api/daily-points/:id", async (req, res) => {
+  try {
+    const PontoId = parseInt(req.params.id);
+    const { entry, exit, gateOpen, date } = req.body; // Adicione 'date' aqui
+
+    // Use a data enviada pelo front-end, ou a data atual como fallback
+    const usedDate = date ? new Date(date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
+
+    const combineDateAndTime = (date, time) => {
+      if (!time) return null;
+      return new Date(`${date}T${time}:00.000Z`);
+    };
+
+    const entryDateTime = combineDateAndTime(usedDate, entry);
+    const exitDateTime = combineDateAndTime(usedDate, exit);
+    const gateOpenDateTime = combineDateAndTime(usedDate, gateOpen);
+
+    let existingPoint = await prisma.dailyPoint.findFirst({
+      where: {
+        id: PontoId,
+      },
+    });
+
+    if (!existingPoint) {
+      existingPoint = await prisma.dailyPoint.create({
+        data: {
+          date: new Date(usedDate),
+          entry: entryDateTime,
+          exit: exitDateTime,
+          gateOpen: gateOpenDateTime,
+          employeeId,
+        },
+      });
+
+      return res.status(201).json({
+        message: "Registro criado para o dia informado.",
+        point: existingPoint,
+      });
+    }
+
+    const updatedPoint = await prisma.dailyPoint.update({
+      where: { id: existingPoint.id },
+      data: {
+        entry: entryDateTime || existingPoint.entry,
+        exit: exitDateTime || existingPoint.exit,
+        gateOpen: gateOpenDateTime || existingPoint.gateOpen,
+      },
+    });
+
+    res.status(200).json({
+      message: "Registro atualizado com sucesso.",
+      point: updatedPoint,
+    });
+  } catch (error) {
+    console.error("Erro ao atualizar ou criar ponto diário:", error);
+    res.status(500).json({
+      error: "Erro ao atualizar ou criar ponto diário",
+      details: error.message,
+    });
+  }
+});
+
+app.put("/api/daily-points/falta/:id", async (req, res) => {
+  try {
+    const employeeId = parseInt(req.params.id);
+    const { entry, exit, gateOpen, date } = req.body; // Adicione 'date' aqui
+
+    // Use a data enviada pelo front-end, ou a data atual como fallback
+    const usedDate = date ? new Date(date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
+
+    const combineDateAndTime = (date, time) => {
+      if (!time) return null;
+      return new Date(`${date}T${time}:00.000Z`);
+    };
+
+    const entryDateTime = combineDateAndTime(usedDate, entry);
+    const exitDateTime = combineDateAndTime(usedDate, exit);
+    const gateOpenDateTime = combineDateAndTime(usedDate, gateOpen);
+
+    let existingPoint = await prisma.dailyPoint.findFirst({
+      where: {
+        employeeId: employeeId,
+        date: {
+          gte: new Date(`${usedDate}T00:00:00.000Z`),
+          lt: new Date(`${usedDate}T23:59:59.999Z`),
+        },
+      },
+    });
+
+    if (!existingPoint) {
+      existingPoint = await prisma.dailyPoint.create({
+        data: {
+          date: new Date(usedDate),
+          entry: entryDateTime,
+          exit: exitDateTime,
+          gateOpen: gateOpenDateTime,
+          employeeId,
+        },
+      });
+
+      return res.status(201).json({
+        message: "Registro criado para o dia informado.",
+        point: existingPoint,
+      });
+    }
+
+    const updatedPoint = await prisma.dailyPoint.update({
+      where: { id: existingPoint.id },
+      data: {
+        entry: null,
+        exit: null,
+        gateOpen: null,
+        falta: true,
+      },
+    });
+
+    res.status(200).json({
+      message: "Registro atualizado com sucesso.",
+      point: updatedPoint,
+    });
+  } catch (error) {
+    console.error("Erro ao atualizar ou criar ponto diário:", error);
+    res.status(500).json({
+      error: "Erro ao atualizar ou criar ponto diário",
+      details: error.message,
+    });
+  }
+});
+
+app.put("/api/daily-points/falta-manual/:id", async (req, res) => {
+  try {
+    const employeeId = parseInt(req.params.id);
+    const { entry, exit, gateOpen, date } = req.body; // Adicione 'date' aqui
+
+    // Use a data enviada pelo front-end, ou a data atual como fallback
+    const usedDate = date ? new Date(date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
+
+    const combineDateAndTime = (date, time) => {
+      if (!time) return null;
+      return new Date(`${date}T${time}:00.000Z`);
+    };
+
+    let existingPoint = await prisma.dailyPoint.findFirst({
+      where: {
+        employeeId: employeeId,
+        date: {
+          gte: new Date(`${usedDate}T00:00:00.000Z`),
+          lt: new Date(`${usedDate}T23:59:59.999Z`),
+        },
+      },
+    });
+
+    if (!existingPoint) {
+      existingPoint = await prisma.dailyPoint.create({
+        data: {
+          date: new Date(usedDate),
+          entry: null,
+          exit: null,
+          gateOpen: null,
+          falta: true,
+          employeeId: employeeId,
+        },
+      });
+
+      return res.status(201).json({
+        message: "Registro criado para o dia informado.",
+        point: existingPoint,
+      });
+    }
+
+    const updatedPoint = await prisma.dailyPoint.update({
+      where: { id: existingPoint.id },
+      data: {
+        entry: null,
+        exit: null,
+        gateOpen: null,
+        falta: true,
+      },
+    });
+
+    res.status(200).json({
+      message: "Registro atualizado com sucesso.",
+      point: updatedPoint,
+    });
+  } catch (error) {
+    console.error("Erro ao atualizar ou criar ponto diário:", error);
+    res.status(500).json({
+      error: "Erro ao atualizar ou criar ponto diário",
+      details: error.message,
+    });
+  }
+});
+
+app.delete("/api/daily-points/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "ID inválido" });
+    }
+
+    await prisma.dailyPoint.delete({ where: { id } });
+    res.json({ message: "Registro de DailyPoint excluído com sucesso." });
+  } catch (error) {
+    console.error("Erro ao excluir registro de DailyPoint:", error);
+    res.status(500).json({ error: "Erro ao excluir registro de DailyPoint", details: error.message });
+  }
+});
+
+app.delete("/api/daily-points", async (req, res) => {
+  const { employeeId, date } = req.query;
+  if (!employeeId) {
+    return res.status(400).json({ error: "employeeId é obrigatório" });
+  }
+
+  // Se quiser filtrar também por data:
+  let where = { employeeId: parseInt(employeeId) };
+  if (date) {
+    const usedDate = new Date(date).toISOString().split("T")[0];
+    where.date = {
+      gte: new Date(`${usedDate}T00:00:00.000Z`),
+      lt: new Date(`${usedDate}T23:59:59.999Z`),
+    };
+  }
+
+  try {
+    const result = await prisma.dailyPoint.deleteMany({ where });
+    res.json({ message: "Registros de DailyPoints excluídos com sucesso.", count: result.count });
+  } catch (error) {
+    console.error("Erro ao excluir registros de DailyPoints:", error);
+    res.status(500).json({ error: "Erro ao excluir registros de DailyPoints", details: error.message });
+  }
+});
+
+// ROTA DE RECUPERAÇÃO DE SENHA
+
+app.post("/api/forgot-password", async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    const user = await prisma.user.findUnique({ where: { username: email } });
+    if (!user) {
+      return res.status(404).json({ message: "Usuário não encontrado" });
+    }
+
+    const token = jwt.sign({ email }, SECRET_KEY, { expiresIn: "1h" });
+
+    await sendResetEmail(email, token); // Função para enviar o e-mail
+    res.json({ message: "E-mail de redefinição enviado com sucesso" });
+  } catch (error) {
+    console.error("Erro ao processar redefinição de senha:", error);
+    res.status(500).json({ message: "Erro ao processar redefinição de senha" });
+  }
+});
+
+app.post("/api/reset-password", async (req, res) => {
+  const { token, newPassword } = req.body;
+
+  try {
+    // Verifica e decodifica o token JWT
+    const decoded = jwt.verify(token, SECRET_KEY);
+
+    // Atualiza a senha do usuário
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await prisma.user.update({
+      where: { username: decoded.email },
+      data: { password: hashedPassword },
+    });
+
+    res.json({ message: "Senha redefinida com sucesso" });
+  } catch (error) {
+    console.error("Erro ao redefinir senha:", error);
+    res.status(400).json({ message: "Token inválido ou expirado" });
+  }
+});
+
+app.post("/api/validate-token", (req, res) => {
+  const { token } = req.body;
+
+  try {
+    jwt.verify(token, SECRET_KEY);
+    res.json({ message: "Token válido" });
+  } catch (error) {
+    console.error("Token inválido ou expirado:", error);
+    res.status(401).json({ message: "Token inválido ou expirado" });
+  }
+});
+
+// ROTAS DE DESPESAS (CADASTRO)
+app.get("/api/cadastrodesp", async (req, res) => res.json(await prisma.CadDespesa.findMany()));
+
+app.get("/api/cadastrodesp/:id", async (req, res) => {
+  const CadDespesa = await prisma.CadDespesa.findUnique({
+    where: { id: parseInt(req.params.id) },
+  });
+  res.json(CadDespesa || { error: "Despesa não encontrada" });
+});
+
+app.post("/api/cadastrodesp", async (req, res) => {
+  try {
+    const { nomeDespesa } = req.body;
+    const newDespesa = await prisma.CadDespesa.create({
+      data: { nomeDespesa },
+    });
+
+    res.status(201).json(newDespesa);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao criar Despesa", details: error.message });
+  }
+});
+
+app.put("/api/cadastrodesp/:id", async (req, res) => {
+  try {
+    const { nomeDespesa } = req.body;
+    const updatedDespesa = await prisma.CadDespesa.update({
+      where: { id: parseInt(req.params.id) },
+      data: { nomeDespesa },
+    });
+
+    res.json(updatedDespesa);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao atualizar compra", details: error.message });
+  }
+});
+
+app.delete("/api/cadastrodesp/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "ID inválido" });
+    }
+
+    await prisma.CadDespesa.delete({ where: { id } });
+    res.json({ message: "Despesa excluída com sucesso" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir compra", details: error.message });
+  }
+});
+
+// CRUD para valor da máquina por semana
+app.get("/api/machine-week-value", async (req, res) => {
+  const { year, month, week } = req.query;
+  const where = {};
+  if (year) where.year = parseInt(year);
+  if (month) where.month = parseInt(month);
+  if (week) where.week = parseInt(week);
+  try {
+    const values = await prisma.machineWeekValue.findMany({ where });
+    res.json(values);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar valores da máquina", details: error.message });
+  }
+});
+
+app.post("/api/machine-week-value", async (req, res) => {
+  const { year, month, week, value } = req.body;
+  try {
+    // Se já existe, atualiza; senão, cria
+    const existing = await prisma.machineWeekValue.findFirst({ where: { year, month, week } });
+    let result;
+    if (existing) {
+      result = await prisma.machineWeekValue.update({
+        where: { id: existing.id },
+        data: { value },
+      });
+    } else {
+      result = await prisma.machineWeekValue.create({
+        data: { year, month, week, value },
+      });
+    }
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao salvar valor da máquina", details: error.message });
+  }
+});
+
+// GET /api/categories - Listar categorias com subcategorias
+app.get("/api/categories", async (req, res) => {
+  try {
+    const categories = await prisma.category.findMany({
+      where: { parentId: null }, // Só categorias principais
+      include: {
+        subcategories: {
+          include: {
+            products: true,
+            prod_estoq: true
+          }
+        },
+        products: true,
+        prod_estoq: true
+      },
+    });
+    res.json(categories);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar categorias", details: error.message });
+  }
+});
+
+// GET /api/categories/all - Listar todas as categorias (incluindo subcategorias)
+app.get("/api/categories/all", async (req, res) => {
+  try {
+    const categories = await prisma.category.findMany({
+      include: {
+        parent: true,
+        subcategories: true,
+        products: true,
+        prod_estoq: true
+      },
+    });
+    res.json(categories);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar todas as categorias", details: error.message });
+  }
+});
+
+// POST /api/categories - Criar categoria ou subcategoria
+app.post("/api/categories", async (req, res) => {
+  try {
+    const { name, parentId } = req.body;
+    
+    if (!name || name.trim() === '') {
+      return res.status(400).json({ error: "Nome da categoria é obrigatório" });
+    }
+
+    const data = { name: name.trim() };
+    if (parentId && !isNaN(parseInt(parentId))) {
+      // Verificar se a categoria pai existe
+      const parentCategory = await prisma.category.findUnique({
+        where: { id: parseInt(parentId) }
+      });
+      
+      if (!parentCategory) {
+        return res.status(404).json({ error: "Categoria pai não encontrada" });
+      }
+      
+      data.parentId = parseInt(parentId);
+    }
+
+    const category = await prisma.category.create({ 
+      data,
+      include: {
+        parent: true,
+        subcategories: true
+      }
+    });
+    
+    res.status(201).json(category);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao criar categoria", details: error.message });
+  }
+});
+
+// PUT /api/categories/:id - Atualizar categoria
+app.put("/api/categories/:id", async (req, res) => {
+  try {
+    const { name, parentId } = req.body;
+    const categoryId = parseInt(req.params.id);
+    
+    if (isNaN(categoryId)) {
+      return res.status(400).json({ error: "ID da categoria inválido" });
+    }
+
+    if (!name || name.trim() === '') {
+      return res.status(400).json({ error: "Nome da categoria é obrigatório" });
+    }
+
+    const data = { name: name.trim() };
+    
+    if (parentId !== undefined) {
+      if (parentId === null || parentId === '') {
+        data.parentId = null;
+      } else {
+        const parentIdNum = parseInt(parentId);
+        if (parentIdNum === categoryId) {
+          return res.status(400).json({ error: "Uma categoria não pode ser pai de si mesma" });
+        }
+        
+        // Verificar se a categoria pai existe
+        const parentCategory = await prisma.category.findUnique({
+          where: { id: parentIdNum }
+        });
+        
+        if (!parentCategory) {
+          return res.status(404).json({ error: "Categoria pai não encontrada" });
+        }
+        
+        data.parentId = parentIdNum;
+      }
+    }
+
+    const updatedCategory = await prisma.category.update({
+      where: { id: categoryId },
+      data,
+      include: {
+        parent: true,
+        subcategories: true
+      }
+    });
+
+    res.json(updatedCategory);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao atualizar categoria", details: error.message });
+  }
+});
+
+// DELETE /api/categories/:id - Excluir categoria (substitua a existente)
+app.delete("/api/categories/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "ID inválido" });
+    }
+
+    // Verificar se a categoria tem subcategorias
+    const subcategories = await prisma.category.findMany({
+      where: { parentId: id }
+    });
+
+    if (subcategories.length > 0) {
+      return res.status(400).json({ 
+        error: "Não é possível excluir uma categoria que possui subcategorias. Exclua primeiro as subcategorias." 
+      });
+    }
+
+    // Verificar se a categoria tem produtos associados
+    const productsCount = await prisma.product.count({
+      where: { categoryId: id }
+    });
+
+    const estoqueCount = await prisma.estoque.count({
+      where: { categoria_Id: id }
+    });
+
+    if (productsCount > 0 || estoqueCount > 0) {
+      return res.status(400).json({ 
+        error: "Não é possível excluir uma categoria que possui produtos associados." 
+      });
+    }
+
+    await prisma.category.delete({ where: { id } });
+    res.json({ message: "Categoria excluída com sucesso" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir categoria", details: error.message });
+  }
+});
+
+// Rota para criar uma nova venda (PDV)
+app.post('/api/sales', async (req, res) => {
+  try {
+    const { items, total, paymentMethod, customerName, amountReceived, change, date } = req.body;
+    
+    // Criar registro da venda
+    const sale = await prisma.sale.create({
+      data: {
+        total: parseFloat(total),
+        paymentMethod,
+        customerName,
+        amountReceived: parseFloat(amountReceived) || total,
+        change: parseFloat(change) || 0,
+        date: parseISO(date),
+        items: {
+          create: items.map(item => ({
+            productId: item.id,
+            productName: item.name,
+            quantity: item.quantity,
+            unitPrice: item.price,
+            total: item.price * item.quantity
+          }))
+        }
+      },
+      include: {
+        items: true
+      }
+    });
+
+    res.status(201).json(sale);
+  } catch (error) {
+    console.error('Erro ao criar venda:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// Rota para buscar vendas
+app.get('/api/sales', async (req, res) => {
+  try {
+    const sales = await prisma.sale.findMany({
+      include: {
+        items: true
+      },
+      orderBy: {
+        date: 'desc'
+      }
+    });
+    
+    res.json(sales);
+  } catch (error) {
+    console.error('Erro ao buscar vendas:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+app.get('/api/unit-equivalences', async (req, res) => {
+  try {
+    const equivalences = await prisma.unitEquivalence.findMany({
+      orderBy: { unitName: 'asc' }
+    });
+    res.json(equivalences);
+  } catch (error) {
+    console.error('Erro ao buscar equivalências:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// POST /api/unit-equivalences - Criar nova equivalência
+app.post('/api/unit-equivalences', async (req, res) => {
+  try {
+    const { unitName, value } = req.body;
+    
+    if (!unitName || !value || value <= 0) {
+      return res.status(400).json({ error: 'Nome da unidade e valor são obrigatórios' });
+    }
+
+    // Verificar se já existe equivalência para esta unidade
+    const existingEquivalence = await prisma.unitEquivalence.findUnique({
+      where: { unitName }
+    });
+
+    if (existingEquivalence) {
+      return res.status(409).json({ error: 'Unidade já possui equivalência definida' });
+    }
+
+    const equivalence = await prisma.unitEquivalence.create({
+      data: { 
+        unitName, 
+        value: parseFloat(value) 
+      }
+    });
+    
+    res.status(201).json(equivalence);
+  } catch (error) {
+    console.error('Erro ao criar equivalência:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// PUT /api/unit-equivalences/:unitName - Atualizar equivalência
+app.put('/api/unit-equivalences/:unitName', async (req, res) => {
+  try {
+    const { unitName } = req.params;
+    const { value } = req.body;
+    
+    if (!value || value <= 0) {
+      return res.status(400).json({ error: 'Valor é obrigatório e deve ser maior que zero' });
+    }
+
+    const equivalence = await prisma.unitEquivalence.update({
+      where: { unitName },
+      data: { value: parseFloat(value) }
+    });
+    
+    res.json(equivalence);
+  } catch (error) {
+    if (error.code === 'P2025') {
+      return res.status(404).json({ error: 'Equivalência não encontrada' });
+    }
+    console.error('Erro ao atualizar equivalência:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// DELETE /api/unit-equivalences/:unitName - Deletar equivalência
+app.delete('/api/unit-equivalences/:unitName', async (req, res) => {
+  try {
+    const { unitName } = req.params;
+    
+    await prisma.unitEquivalence.delete({
+      where: { unitName }
+    });
+    
+    res.json({ message: 'Equivalência excluída com sucesso' });
+  } catch (error) {
+    if (error.code === 'P2025') {
+      return res.status(404).json({ error: 'Equivalência não encontrada' });
+    }
+    console.error('Erro ao excluir equivalência:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// ROTAS DE DESPESAS PESSOAIS
+app.get("/api/desp-pessoal", async (req, res) => {
+  try {
+    const despesas = await prisma.despPessoal.findMany({
+      include: { categoria: true }
+    });
+    res.json(despesas);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar despesas pessoais", details: error.message });
+  }
+});
+
+app.get("/api/desp-pessoal/:id", async (req, res) => {
+  try {
+    const despesa = await prisma.despPessoal.findUnique({
+      where: { id: parseInt(req.params.id) },
+      include: { categoria: true }
+    });
+    res.json(despesa || { error: "Despesa pessoal não encontrada" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar despesa pessoal", details: error.message });
+  }
+});
+
+app.post("/api/desp-pessoal", async (req, res) => {
+  try {
+    const { nomeDespesa, valorDespesa, descDespesa, date, DespesaFixa, categoriaId, tipoMovimento, valeRelacionadoId, isVale } = req.body;
+    console.log("Dados recebidos:", req.body);
+
+    const parsedDate = new Date(date.replace(" ", "T"));
+
+    const data = { 
+      nomeDespesa, 
+      date: parsedDate, 
+      DespesaFixa,
+      tipoMovimento: tipoMovimento || "GASTO"
+    };
+    
+    // Adicionar categoria usando relação
+    if (categoriaId) {
+      data.categoria = { connect: { id: categoriaId } };
+    }
+    
+    if (valorDespesa !== undefined) data.valorDespesa = valorDespesa;
+    if (descDespesa !== undefined) data.descDespesa = descDespesa;
+    if (valeRelacionadoId !== undefined) data.valeRelacionadoId = valeRelacionadoId;
+    if (isVale !== undefined) data.isVale = isVale;
+
+    const newDespesa = await prisma.despPessoal.create({
+      data,
+      include: { categoria: true }
+    });
+    res.status(201).json(newDespesa);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao criar despesa pessoal", details: error.message });
+  }
+});
+
+app.put("/api/desp-pessoal/:id", async (req, res) => {
+  try {
+    const { nomeDespesa, valorDespesa, descDespesa, date, DespesaFixa, categoriaId, tipoMovimento, valeRelacionadoId, isVale } = req.body;
+    
+    const updateData = {};
+    if (nomeDespesa !== undefined) updateData.nomeDespesa = nomeDespesa;
+    if (valorDespesa !== undefined) updateData.valorDespesa = valorDespesa;
+    if (descDespesa !== undefined) updateData.descDespesa = descDespesa;
+    if (tipoMovimento !== undefined) updateData.tipoMovimento = tipoMovimento;
+    if (valeRelacionadoId !== undefined) updateData.valeRelacionadoId = valeRelacionadoId;
+    if (DespesaFixa !== undefined) updateData.DespesaFixa = DespesaFixa;
+    if (isVale !== undefined) updateData.isVale = isVale;
+    
+    // Atualizar categoria usando relação
+    if (categoriaId !== undefined) {
+      if (categoriaId === null) {
+        updateData.categoria = { disconnect: true };
+      } else {
+        updateData.categoria = { connect: { id: categoriaId } };
+      }
+    }
+    
+    // Processar data se fornecida
+    if (date !== undefined) {
+      const parsedDate = new Date(date.replace(" ", "T"));
+      updateData.date = parsedDate;
+    }
+    
+    const updatedDespesa = await prisma.despPessoal.update({
+      where: { id: parseInt(req.params.id) },
+      data: updateData,
+      include: { categoria: true }
+    });
+    res.json(updatedDespesa);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao atualizar despesa pessoal", details: error.message });
+  }
+});
+
+app.delete("/api/desp-pessoal/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "ID inválido" });
+    }
+
+    await prisma.despPessoal.delete({ where: { id } });
+    res.json({ message: "Despesa pessoal excluída com sucesso" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir despesa pessoal", details: error.message });
+  }
+});
+
+// ROTAS DE CATEGORIAS DE DESPESAS PESSOAIS
+app.get("/api/cat-desp-pessoal", async (req, res) => {
+  try {
+    const categorias = await prisma.catDespPessoal.findMany({
+      include: { DespPessoal: true }
+    });
+    res.json(categorias);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar categorias de despesas pessoais", details: error.message });
+  }
+});
+
+app.post("/api/cat-desp-pessoal", async (req, res) => {
+  try {
+    const { nomeCategoria } = req.body;
+    const newCategoria = await prisma.catDespPessoal.create({
+      data: { nomeCategoria }
+    });
+    res.status(201).json(newCategoria);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao criar categoria de despesa pessoal", details: error.message });
+  }
+});
+
+app.put("/api/cat-desp-pessoal/:id", async (req, res) => {
+  try {
+    const { nomeCategoria } = req.body;
+    const updatedCategoria = await prisma.catDespPessoal.update({
+      where: { id: parseInt(req.params.id) },
+      data: { nomeCategoria }
+    });
+    res.json(updatedCategoria);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao atualizar categoria de despesa pessoal", details: error.message });
+  }
+});
+
+app.delete("/api/cat-desp-pessoal/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "ID inválido" });
+    }
+
+    await prisma.catDespPessoal.delete({ where: { id } });
+    res.json({ message: "Categoria de despesa pessoal excluída com sucesso" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir categoria de despesa pessoal", details: error.message });
+  }
+});
+
+// ROTAS DE HISTÓRICO DE METAS DE FUNCIONÁRIOS
+// GET - Buscar meta vigente para um funcionário em uma data específica
+app.get("/api/employee-meta/:employeeId", async (req, res) => {
+  try {
+    const employeeId = parseInt(req.params.employeeId);
+    const { date } = req.query; // formato: YYYY-MM-DD
+    
+    if (isNaN(employeeId)) {
+      return res.status(400).json({ error: "ID do funcionário inválido" });
+    }
+
+    const targetDate = date ? new Date(date) : new Date();
+
+    // Buscar meta vigente para a data
+    const meta = await prisma.employeeMetaHistory.findFirst({
+      where: {
+        employeeId,
+        validFrom: { lte: targetDate },
+        OR: [
+          { validUntil: null }, // Meta atual
+          { validUntil: { gte: targetDate } } // Meta que estava vigente
+        ]
+      },
+      orderBy: { validFrom: 'desc' }
+    });
+
+    if (!meta) {
+      // Se não houver histórico, retornar valores do Employee
+      const employee = await prisma.employee.findUnique({
+        where: { id: employeeId },
+        select: { valorHora: true, metaHoras: true, bonificacao: true }
+      });
+      
+      return res.json({
+        valorHora: employee?.valorHora || null,
+        metaHoras: employee?.metaHoras || null,
+        bonificacao: employee?.bonificacao || null,
+        isFromHistory: false
+      });
+    }
+
+    res.json({
+      valorHora: meta.valorHora,
+      metaHoras: meta.metaHoras,
+      bonificacao: meta.bonificacao,
+      validFrom: meta.validFrom,
+      validUntil: meta.validUntil,
+      isFromHistory: true
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar meta do funcionário", details: error.message });
+  }
+});
+
+// GET - Buscar todo o histórico de metas de um funcionário
+app.get("/api/employee-meta-history/:employeeId", async (req, res) => {
+  try {
+    const employeeId = parseInt(req.params.employeeId);
+    
+    if (isNaN(employeeId)) {
+      return res.status(400).json({ error: "ID do funcionário inválido" });
+    }
+
+    const history = await prisma.employeeMetaHistory.findMany({
+      where: { employeeId },
+      orderBy: { validFrom: 'desc' }
+    });
+
+    res.json(history);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar histórico de metas", details: error.message });
+  }
+});
+
+// POST - Criar nova meta (ao alterar meta de funcionário)
+app.post("/api/employee-meta", async (req, res) => {
+  try {
+    const { employeeId, valorHora, metaHoras, bonificacao, validFrom } = req.body;
+
+    if (!employeeId || valorHora === undefined || metaHoras === undefined || bonificacao === undefined) {
+      return res.status(400).json({ error: "Dados incompletos" });
+    }
+
+    const validFromDate = validFrom ? new Date(validFrom) : new Date();
+    // Garantir que é o primeiro dia do mês
+    validFromDate.setDate(1);
+    validFromDate.setHours(0, 0, 0, 0);
+
+    // Fechar meta anterior (se existir)
+    const lastMeta = await prisma.employeeMetaHistory.findFirst({
+      where: {
+        employeeId,
+        validUntil: null
+      },
+      orderBy: { validFrom: 'desc' }
+    });
+
+    if (lastMeta) {
+      // Fechar a meta anterior no último dia do mês anterior
+      const validUntil = new Date(validFromDate);
+      validUntil.setDate(0); // Último dia do mês anterior
+      validUntil.setHours(23, 59, 59, 999);
+
+      await prisma.employeeMetaHistory.update({
+        where: { id: lastMeta.id },
+        data: { validUntil }
+      });
+    }
+
+    // Criar nova meta
+    const newMeta = await prisma.employeeMetaHistory.create({
+      data: {
+        employeeId,
+        valorHora,
+        metaHoras,
+        bonificacao,
+        validFrom: validFromDate,
+        validUntil: null // Meta atual, sem data de fim
+      }
+    });
+
+    // Atualizar valores atuais no Employee
+    await prisma.employee.update({
+      where: { id: employeeId },
+      data: { valorHora, metaHoras, bonificacao }
+    });
+
+    res.status(201).json(newMeta);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao criar meta", details: error.message });
+  }
+});
+
+// ROTAS DE METAS SEMANAIS DE FUNCIONÁRIOS
+// GET - Buscar meta semanal para um funcionário em uma semana específica
+app.get("/api/employee-weekly-meta/:employeeId", async (req, res) => {
+  try {
+    const employeeId = parseInt(req.params.employeeId);
+    const { weekStart, year, month, date } = req.query;
+    
+    if (isNaN(employeeId)) {
+      return res.status(400).json({ error: "ID do funcionário inválido" });
+    }
+
+    let where = { employeeId };
+    
+    if (weekStart) {
+      // Buscar meta específica para uma semana pelo weekStart
+      where.weekStart = new Date(weekStart);
+      
+      const meta = await prisma.employeeWeeklyMeta.findUnique({
+        where: {
+          employeeId_weekStart: {
+            employeeId,
+            weekStart: new Date(weekStart)
+          }
+        }
+      });
+
+      if (!meta) {
+        // Se não existe meta específica, retornar valores padrão do funcionário
+        const employee = await prisma.employee.findUnique({
+          where: { id: employeeId },
+          select: { valorHora: true, metaHoras: true, bonificacao: true }
+        });
+        
+        return res.json({
+          metaHoras: employee?.metaHoras || null,
+          bonificacao: employee?.bonificacao || null,
+          valorHora: employee?.valorHora || null,
+          isDefault: true
+        });
+      }
+
+      return res.json({
+        ...meta,
+        isDefault: false
+      });
+    }
+    
+    if (date) {
+      // Buscar meta para uma data específica (pode cair em qualquer dia da semana)
+      const searchDate = new Date(date);
+      searchDate.setHours(12, 0, 0, 0); // Meio-dia para evitar problemas de timezone
+      
+      const meta = await prisma.employeeWeeklyMeta.findFirst({
+        where: {
+          employeeId,
+          weekStart: { lte: searchDate },
+          weekEnd: { gte: searchDate }
+        },
+        orderBy: { weekStart: 'desc' }
+      });
+
+      if (!meta) {
+        // Se não existe meta específica, retornar valores padrão do funcionário
+        const employee = await prisma.employee.findUnique({
+          where: { id: employeeId },
+          select: { valorHora: true, metaHoras: true, bonificacao: true }
+        });
+        
+        return res.json({
+          metaHoras: employee?.metaHoras || null,
+          bonificacao: employee?.bonificacao || null,
+          valorHora: employee?.valorHora || null,
+          isDefault: true
+        });
+      }
+
+      return res.json({
+        ...meta,
+        isDefault: false
+      });
+    }
+    
+    if (year && month) {
+      // Buscar todas as metas de um mês
+      where.year = parseInt(year);
+      where.month = parseInt(month);
+    }
+
+    const metas = await prisma.employeeWeeklyMeta.findMany({
+      where,
+      orderBy: { weekStart: 'asc' }
+    });
+
+    res.json(metas);
+  } catch (error) {
+    console.error("Erro ao buscar meta semanal:", error);
+    res.status(500).json({ error: "Erro ao buscar meta semanal", details: error.message });
+  }
+});
+
+// POST - Criar ou atualizar meta semanal
+app.post("/api/employee-weekly-meta", async (req, res) => {
+  try {
+    const { employeeId, weekStart, metaHoras, bonificacao, valorHora, year, month } = req.body;
+
+    if (!employeeId || !weekStart || metaHoras === undefined || bonificacao === undefined || valorHora === undefined) {
+      return res.status(400).json({ error: "Dados incompletos" });
+    }
+
+    const weekStartDate = new Date(weekStart);
+    weekStartDate.setHours(0, 0, 0, 0);
+    
+    // Calcular weekEnd (domingo, 5 dias após a terça-feira)
+    const weekEndDate = new Date(weekStartDate);
+    weekEndDate.setDate(weekEndDate.getDate() + 5);
+    weekEndDate.setHours(23, 59, 59, 999);
+
+    // Verificar se já existe meta para esta semana
+    const existingMeta = await prisma.employeeWeeklyMeta.findUnique({
+      where: {
+        employeeId_weekStart: {
+          employeeId: parseInt(employeeId),
+          weekStart: weekStartDate
+        }
+      }
+    });
+
+    let result;
+    if (existingMeta) {
+      // Atualizar meta existente
+      result = await prisma.employeeWeeklyMeta.update({
+        where: { id: existingMeta.id },
+        data: {
+          weekEnd: weekEndDate,
+          metaHoras: parseFloat(metaHoras),
+          bonificacao: parseFloat(bonificacao),
+          valorHora: parseFloat(valorHora)
+        }
+      });
+    } else {
+      // Criar nova meta
+      result = await prisma.employeeWeeklyMeta.create({
+        data: {
+          employeeId: parseInt(employeeId),
+          weekStart: weekStartDate,
+          weekEnd: weekEndDate,
+          year: year || weekStartDate.getFullYear(),
+          month: month || weekStartDate.getMonth() + 1,
+          metaHoras: parseFloat(metaHoras),
+          bonificacao: parseFloat(bonificacao),
+          valorHora: parseFloat(valorHora)
+        }
+      });
+    }
+
+    res.status(201).json(result);
+  } catch (error) {
+    console.error("Erro ao salvar meta semanal:", error);
+    res.status(500).json({ error: "Erro ao salvar meta semanal", details: error.message });
+  }
+});
+
+// DELETE - Deletar meta semanal (volta a usar valores padrão do funcionário)
+app.delete("/api/employee-weekly-meta/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "ID inválido" });
+    }
+
+    await prisma.employeeWeeklyMeta.delete({
+      where: { id }
+    });
+
+    res.json({ message: "Meta semanal excluída com sucesso" });
+  } catch (error) {
+    console.error("Erro ao excluir meta semanal:", error);
+    res.status(500).json({ error: "Erro ao excluir meta semanal", details: error.message });
+  }
+});
+
+// POST - Migrar dados criando metas semanais específicas para todas as semanas com pontos
+app.post("/api/migrate-employee-meta-history", async (req, res) => {
+  try {
+    console.log("Iniciando migração de metas semanais...");
+    
+    // Buscar todos os funcionários
+    const employees = await prisma.employee.findMany({
+      where: {
+        ativo: true
+      }
+    });
+
+    console.log(`Encontrados ${employees.length} funcionários ativos`);
+
+    if (employees.length === 0) {
+      return res.json({ 
+        message: "Nenhum funcionário encontrado",
+        totalEmployees: 0,
+        totalWeeks: 0,
+        created: 0,
+        skipped: 0
+      });
+    }
+
+    let totalWeeksCreated = 0;
+    let totalWeeksSkipped = 0;
+    const results = [];
+
+    // Função auxiliar para calcular início e fim da semana (terça a domingo)
+    const getWeekRange = (date) => {
+      const currentDate = new Date(date);
+      const dayOfWeek = currentDate.getDay();
+      
+      let tuesday = new Date(currentDate);
+      if (dayOfWeek === 0) { // Domingo
+        tuesday.setDate(tuesday.getDate() - 5);
+      } else if (dayOfWeek === 1) { // Segunda
+        tuesday.setDate(tuesday.getDate() - 6);
+      } else if (dayOfWeek >= 2) { // Terça a sábado
+        tuesday.setDate(tuesday.getDate() - (dayOfWeek - 2));
+      }
+      tuesday.setHours(0, 0, 0, 0);
+      
+      const sunday = new Date(tuesday);
+      sunday.setDate(sunday.getDate() + 5);
+      sunday.setHours(23, 59, 59, 999);
+      
+      return { weekStart: tuesday, weekEnd: sunday };
+    };
+
+    for (const employee of employees) {
+      console.log(`Processando funcionário: ${employee.name} (ID: ${employee.id})`);
+      
+      // Buscar todos os pontos do funcionário
+      const points = await prisma.dailyPoint.findMany({
+        where: { 
+          employeeId: employee.id,
+          date: { not: null }
+        },
+        orderBy: { date: 'asc' }
+      });
+
+      console.log(`  - ${points.length} pontos encontrados`);
+
+      if (points.length === 0) {
+        results.push({
+          employeeId: employee.id,
+          name: employee.name,
+          status: "no-points",
+          weeksCreated: 0,
+          weeksSkipped: 0,
+          message: "Sem pontos registrados"
+        });
+        continue;
+      }
+
+      // Agrupar pontos por semana
+      const weeklyGroups = new Map();
+      
+      points.forEach(point => {
+        const pointDate = new Date(point.date);
+        const dayOfWeek = pointDate.getDay();
+        
+        // Ignorar segundas-feiras
+        if (dayOfWeek === 1) return;
+        
+        const { weekStart, weekEnd } = getWeekRange(pointDate);
+        const weekKey = weekStart.toISOString().split('T')[0];
+        
+        if (!weeklyGroups.has(weekKey)) {
+          weeklyGroups.set(weekKey, {
+            weekStart,
+            weekEnd,
+            year: weekStart.getFullYear(),
+            month: weekStart.getMonth() + 1
+          });
+        }
+      });
+
+      console.log(`  - ${weeklyGroups.size} semanas únicas identificadas`);
+
+      let weeksCreated = 0;
+      let weeksSkipped = 0;
+
+      // Criar meta para cada semana
+      for (const [weekKey, weekData] of weeklyGroups) {
+        try {
+          // Verificar se já existe meta para esta semana
+          const existing = await prisma.employeeWeeklyMeta.findUnique({
+            where: {
+              employeeId_weekStart: {
+                employeeId: employee.id,
+                weekStart: weekData.weekStart
+              }
+            }
+          });
+
+          if (existing) {
+            console.log(`  - Semana ${weekKey} já possui meta (pulando)`);
+            weeksSkipped++;
+            continue;
+          }
+
+          // Criar meta semanal com valores do funcionário
+          const created = await prisma.employeeWeeklyMeta.create({
+            data: {
+              employeeId: employee.id,
+              weekStart: weekData.weekStart,
+              weekEnd: weekData.weekEnd,
+              year: weekData.year,
+              month: weekData.month,
+              metaHoras: employee.metaHoras || 0,
+              bonificacao: employee.bonificacao || 0,
+              valorHora: employee.valorHora || 0
+            }
+          });
+
+          console.log(`  - ✅ Semana ${weekKey} criada (ID: ${created.id})`);
+          weeksCreated++;
+          totalWeeksCreated++;
+        } catch (error) {
+          console.error(`  - ❌ Erro ao criar meta para semana ${weekKey}:`, error.message);
+          weeksSkipped++;
+        }
+      }
+
+      totalWeeksSkipped += weeksSkipped;
+
+      console.log(`  - Resultado: ${weeksCreated} criadas, ${weeksSkipped} puladas`);
+
+      results.push({
+        employeeId: employee.id,
+        name: employee.name,
+        status: weeksCreated > 0 ? "migrated" : "skipped",
+        weeksCreated,
+        weeksSkipped,
+        totalWeeks: weeklyGroups.size,
+        valorHora: employee.valorHora,
+        metaHoras: employee.metaHoras,
+        bonificacao: employee.bonificacao
+      });
+    }
+
+    console.log(`\n=== RESUMO DA MIGRAÇÃO ===`);
+    console.log(`Total de funcionários: ${employees.length}`);
+    console.log(`Total de semanas criadas: ${totalWeeksCreated}`);
+    console.log(`Total de semanas puladas: ${totalWeeksSkipped}`);
+    console.log(`Total de semanas: ${totalWeeksCreated + totalWeeksSkipped}`);
+
+    res.json({
+      message: "Migração de metas semanais concluída com sucesso",
+      totalEmployees: employees.length,
+      totalWeeksCreated,
+      totalWeeksSkipped,
+      totalWeeks: totalWeeksCreated + totalWeeksSkipped,
+      details: results
+    });
+  } catch (error) {
+    console.error("Erro ao migrar metas semanais:", error);
+    res.status(500).json({ 
+      error: "Erro ao migrar dados de metas semanais", 
+      details: error.message 
+    });
+  }
+});
+
+// ROTA DE TESTE
+// Middleware para servir os arquivos estáticos do React
+app.use(express.static(path.join(__dirname, "dist")));
+
+// Redireciona todas as requisições que não sejam da API para o React
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "dist", "index.html"));
+});
+
+// MIDDLEWARE GLOBAL DE ERRO
+app.use((err, req, res, next) => {
+  console.error("Erro:", err);
+  res.status(500).json({ error: "Erro interno do servidor", details: err.message });
+});
+
+app.listen(port, () => {
+  console.log(`Server tá on krai --> http://localhost:${port}`);
+});
