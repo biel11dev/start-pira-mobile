@@ -45,6 +45,14 @@ export default function PontoScreen({ navigation }) {
   const [metaAtualSemana, setMetaAtualSemana] = useState(null);
   const [descontoValeSemana, setDescontoValeSemana] = useState(0);
   const [descontoValeMes, setDescontoValeMes] = useState(0);
+  const [rangeSemana, setRangeSemana] = useState(null); // { inicio, fim, nome }
+  const [rangeMes, setRangeMes] = useState(null); // { inicio, fim, nome }
+
+  // Modal de detalhamento dos gastos (Gastos Bar) do funcionário
+  const [gastosModalVisible, setGastosModalVisible] = useState(false);
+  const [gastosModalLoading, setGastosModalLoading] = useState(false);
+  const [gastosModalData, setGastosModalData] = useState(null);
+  const [gastosModalTitulo, setGastosModalTitulo] = useState('');
 
   useEffect(() => {
     carregarFuncionarios();
@@ -172,6 +180,7 @@ export default function PontoScreen({ navigation }) {
           wkEnd.setDate(wkEnd.getDate() + 5); // terça -> domingo
           wkEnd.setHours(23, 59, 59, 999);
           setDescontoValeSemana(await buscarDescontoVale(funcSel.name, wkStart, wkEnd));
+          setRangeSemana({ inicio: wkStart, fim: wkEnd, nome: funcSel.name });
         } else {
           setDescontoValeSemana(0);
         }
@@ -209,6 +218,7 @@ export default function PontoScreen({ navigation }) {
           const inicioMes = new Date(ano, mes - 1, 1, 0, 0, 0, 0);
           const fimMes = new Date(ano, mes, 0, 23, 59, 59, 999);
           setDescontoValeMes(await buscarDescontoVale(funcSel.name, inicioMes, fimMes));
+          setRangeMes({ inicio: inicioMes, fim: fimMes, nome: funcSel.name });
         } else {
           setDescontoValeMes(0);
         }
@@ -231,6 +241,27 @@ export default function PontoScreen({ navigation }) {
     } catch (error) {
       console.error('Erro ao buscar gastos bar do funcionário:', error);
       return 0;
+    }
+  };
+
+  // Abre o modal com o detalhamento dos gastos (Gastos Bar) do período
+  const abrirGastosDetalhes = async (range, titulo) => {
+    if (!range?.nome) return;
+    setGastosModalTitulo(titulo);
+    setGastosModalData(null);
+    setGastosModalLoading(true);
+    setGastosModalVisible(true);
+    try {
+      const res = await api.get(
+        `/api/pdv-gastos-bar/funcionario/${encodeURIComponent(range.nome)}`,
+        { params: { startDate: range.inicio.toISOString(), endDate: range.fim.toISOString() } }
+      );
+      setGastosModalData(res.data || { total: 0, itens: [] });
+    } catch (error) {
+      console.error('Erro ao carregar detalhes dos gastos:', error);
+      setGastosModalData({ total: 0, itens: [] });
+    } finally {
+      setGastosModalLoading(false);
     }
   };
 
@@ -866,6 +897,21 @@ export default function PontoScreen({ navigation }) {
                       {descontoVale > 0 && (
                         <Text style={styles.descontoValor}>- R$ {descontoVale.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} 💵</Text>
                       )}
+                      {descontoVale > 0 && (
+                        <>
+                          <Text style={styles.gastoResumoTexto}>Gastos Bar a descontar no fim da semana</Text>
+                          <Button
+                            mode="outlined"
+                            compact
+                            icon="format-list-bulleted"
+                            onPress={() => abrirGastosDetalhes(rangeSemana, `Gastos da semana — ${func.name}`)}
+                            style={styles.gastoDetalheBtn}
+                            textColor="#ff6b6b"
+                          >
+                            Ver gastos detalhados
+                          </Button>
+                        </>
+                      )}
                       {(temBonificacao || descontoVale > 0) ? (
                         <>
                           <View style={styles.divisor} />
@@ -982,6 +1028,21 @@ export default function PontoScreen({ navigation }) {
                       )}
                       {descontoValeMesTotal > 0 && (
                         <Text style={styles.descontoValor}>- R$ {descontoValeMesTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} 💵</Text>
+                      )}
+                      {descontoValeMesTotal > 0 && (
+                        <>
+                          <Text style={styles.gastoResumoTexto}>Gastos Bar a descontar no mês</Text>
+                          <Button
+                            mode="outlined"
+                            compact
+                            icon="format-list-bulleted"
+                            onPress={() => abrirGastosDetalhes(rangeMes, `Gastos do mês — ${func.name}`)}
+                            style={styles.gastoDetalheBtn}
+                            textColor="#ff6b6b"
+                          >
+                            Ver gastos detalhados
+                          </Button>
+                        </>
                       )}
                       {(bonificacaoTotalMes > 0 || descontoValeMesTotal > 0) ? (
                         <>
@@ -1135,6 +1196,75 @@ export default function PontoScreen({ navigation }) {
               Cancelar
             </Button>
           </View>
+        </Modal>
+
+        {/* Modal: detalhamento dos Gastos Bar */}
+        <Modal
+          visible={gastosModalVisible}
+          onDismiss={() => setGastosModalVisible(false)}
+          contentContainerStyle={styles.modalContent}
+        >
+          <Text style={styles.modalTitle}>{gastosModalTitulo || 'Gastos Bar'}</Text>
+          {gastosModalLoading ? (
+            <ActivityIndicator size="large" color="#2196F3" style={{ margin: 20 }} />
+          ) : (
+            <>
+              <View style={styles.gastoResumoBox}>
+                <View style={styles.gastoResumoLinha}>
+                  <Text style={styles.gastoResumoLabel}>Produtos (vale):</Text>
+                  <Text style={styles.gastoResumoValor}>
+                    R$ {Number(gastosModalData?.totalProdutos || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </Text>
+                </View>
+                <View style={styles.gastoResumoLinha}>
+                  <Text style={styles.gastoResumoLabel}>Vales em dinheiro:</Text>
+                  <Text style={styles.gastoResumoValor}>
+                    R$ {Number(gastosModalData?.totalVales || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </Text>
+                </View>
+                <View style={styles.divisor} />
+                <View style={styles.gastoResumoLinha}>
+                  <Text style={styles.gastoResumoTotalLabel}>Total a descontar:</Text>
+                  <Text style={styles.gastoResumoTotalValor}>
+                    R$ {Number(gastosModalData?.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </Text>
+                </View>
+              </View>
+
+              <ScrollView style={styles.gastoItensLista}>
+                {(gastosModalData?.itens || []).length === 0 ? (
+                  <Text style={styles.gastoVazio}>Nenhum gasto no período.</Text>
+                ) : (
+                  (gastosModalData?.itens || []).map((item, idx) => (
+                    <View key={item.id || idx} style={styles.gastoItem}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.gastoItemDesc}>
+                          {item.tipo === 'VALE' ? '💵 ' : '🛒 '}
+                          {item.descricao || (item.tipo === 'VALE' ? 'Vale em dinheiro' : 'Produto')}
+                        </Text>
+                        <Text style={styles.gastoItemData}>
+                          {item.createdAt ? new Date(item.createdAt).toLocaleDateString('pt-BR') : ''}
+                          {item.quantidade ? ` · ${item.quantidade}x` : ''}
+                        </Text>
+                      </View>
+                      <Text style={styles.gastoItemValor}>
+                        R$ {Number(item.valorTotal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </Text>
+                    </View>
+                  ))
+                )}
+              </ScrollView>
+
+              <Button
+                mode="outlined"
+                onPress={() => setGastosModalVisible(false)}
+                textColor="#fff"
+                style={{ marginTop: 12 }}
+              >
+                Fechar
+              </Button>
+            </>
+          )}
         </Modal>
       </Portal>
     </View>
@@ -1321,6 +1451,73 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     marginTop: 4,
+  },
+  gastoResumoTexto: {
+    color: '#ff6b6b',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  gastoDetalheBtn: {
+    borderColor: '#ff6b6b',
+    marginTop: 6,
+    alignSelf: 'flex-start',
+  },
+  gastoResumoBox: {
+    backgroundColor: '#262626',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  gastoResumoLinha: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  gastoResumoLabel: {
+    color: '#bbb',
+  },
+  gastoResumoValor: {
+    color: '#fff',
+  },
+  gastoResumoTotalLabel: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  gastoResumoTotalValor: {
+    color: '#ff6b6b',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  gastoItensLista: {
+    maxHeight: 260,
+  },
+  gastoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  gastoItemDesc: {
+    color: '#fff',
+    fontSize: 14,
+  },
+  gastoItemData: {
+    color: '#888',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  gastoItemValor: {
+    color: '#ff6b6b',
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  gastoVazio: {
+    color: '#888',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginVertical: 16,
   },
   divisor: {
     height: 1,

@@ -9,6 +9,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
+    'X-Client': 'mobile-app', // Identifica a origem para a auditoria (dispositivo)
   },
 });
 

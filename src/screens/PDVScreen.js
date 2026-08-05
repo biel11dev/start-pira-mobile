@@ -59,11 +59,36 @@ export default function PDVScreen({ navigation }) {
   const pixPollRef = useRef(null);
   const pixOrderIdRef = useRef(null);
 
+  // Sub-módulos (abas): venda | comandas | saque
+  const isAdmin = user?.permissions?.acessos === true;
+  const [subTab, setSubTab] = useState('venda');
+
+  // Máquina (Mercado Pago Point)
+  const [pointVisible, setPointVisible] = useState(false);
+  const [pointOrder, setPointOrder] = useState(null);
+  const [pointStatus, setPointStatus] = useState('waiting');
+  const pointPollRef = useRef(null);
+  const pointOrderIdRef = useRef(null);
+
+  // Comanda em pagamento (fluxo de fechamento de comanda)
+  const [comandas, setComandas] = useState([]);
+  const [loadingComandas, setLoadingComandas] = useState(false);
+  const [comandaEmPagamento, setComandaEmPagamento] = useState(null);
+
+  // Saque (troco via máquina)
+  const [saqueValor, setSaqueValor] = useState('');
+  const [saqueObs, setSaqueObs] = useState('');
+  const [saqueFormaId, setSaqueFormaId] = useState(null);
+  const [taxaSaque, setTaxaSaque] = useState(30);
+  const [savingSaque, setSavingSaque] = useState(false);
+
   useEffect(() => {
     carregarProdutos();
     carregarFormasPagamento();
+    carregarTaxaSaque();
     return () => {
       if (pixPollRef.current) clearInterval(pixPollRef.current);
+      if (pointPollRef.current) clearInterval(pointPollRef.current);
     };
   }, []);
 
@@ -101,6 +126,28 @@ export default function PDVScreen({ navigation }) {
       setClientes(res.data || []);
     } catch (error) {
       console.error('Erro ao carregar clientes:', error);
+    }
+  };
+
+  const carregarTaxaSaque = async () => {
+    try {
+      const res = await api.get('/api/pdv-saque/config');
+      if (res.data?.taxa != null) setTaxaSaque(parseFloat(res.data.taxa));
+    } catch (error) {
+      console.log('Usando taxa de saque padrão (30%)');
+    }
+  };
+
+  const carregarComandas = async () => {
+    setLoadingComandas(true);
+    try {
+      const res = await api.get('/api/pdv-comandas-pendentes');
+      setComandas(res.data || []);
+    } catch (error) {
+      console.error('Erro ao carregar comandas:', error);
+      Alert.alert('Erro', 'Não foi possível carregar as comandas');
+    } finally {
+      setLoadingComandas(false);
     }
   };
 
@@ -163,6 +210,8 @@ export default function PDVScreen({ navigation }) {
   const tipoForma = (forma) => {
     if (!forma) return 'outros';
     if (forma.pointType === 'pix_online') return 'pix';
+    // Maquininha (Mercado Pago Point): crédito, débito ou "cliente escolhe"
+    if (forma.pointEnabled) return 'point';
     if (forma.valor === 'dinheiro') return 'dinheiro';
     if (forma.valor === 'vale') return 'vale';
     if (forma.valor === 'pendente') return 'fiado';
@@ -174,6 +223,7 @@ export default function PDVScreen({ navigation }) {
       Alert.alert('Atenção', 'Adicione produtos ao carrinho');
       return;
     }
+    setComandaEmPagamento(null);
     setFormaSelecionada(null);
     setValorRecebido('');
     setSenhaVale('');
@@ -242,6 +292,35 @@ export default function PDVScreen({ navigation }) {
     return res.data;
   };
 
+  // Fecha uma comanda (pagamento de comanda pendente)
+  const fecharComanda = async (label) => {
+    await api.put(`/api/pdv-comandas/${comandaEmPagamento.id}/fechar`, {
+      paymentMethod: label,
+    });
+  };
+
+  // Carrega os itens de uma comanda no carrinho e abre o checkout
+  const iniciarPagamentoComanda = (comanda) => {
+    const itens = (comanda.items || []).map((item) => ({
+      id: item.estoqueId || item.id,
+      name: item.productName || item.name,
+      value: item.unitPrice ?? item.price ?? 0,
+      unit: item.unit || 'un',
+      maxQuantity: item.quantity,
+      quantidade: item.quantity,
+      fromComanda: true,
+    }));
+    setCarrinho(itens);
+    setComandaEmPagamento(comanda);
+    setFormaSelecionada(null);
+    setValorRecebido('');
+    setSenhaVale('');
+    setClienteFiadoId(null);
+    setDescontoTipo('VALOR');
+    setDescontoValor('');
+    setCheckoutVisible(true);
+  };
+
   const finalizarComForma = async () => {
     if (!formaSelecionada) {
       Alert.alert('Atenção', 'Selecione uma forma de pagamento');
@@ -269,33 +348,71 @@ export default function PDVScreen({ navigation }) {
       return;
     }
 
-    // Pix tem fluxo próprio (QR + polling)
+    // Pix e Maquininha têm fluxo próprio (integração + polling),
+    // válido também para pagamento de comanda.
     if (tipo === 'pix') {
       await iniciarPix(finalTotal, label);
       return;
     }
+    if (tipo === 'point') {
+      await iniciarPagamentoPoint(formaSelecionada, finalTotal, label);
+      return;
+    }
 
+    // Fluxo direto (dinheiro / vale / fiado / outros)
     setLoading(true);
     try {
-      const recebido = parseFloat(valorRecebido) || finalTotal;
-      const body = montarBodyVenda({
-        paymentLabel: label,
-        amountReceived: tipo === 'dinheiro' ? recebido : finalTotal,
-        change: tipo === 'dinheiro' ? recebido - finalTotal : 0,
-        valePassword: tipo === 'vale' ? senhaVale : null,
-        pendenteClientId: tipo === 'fiado' ? clienteFiadoId : null,
-      });
-
-      await enviarVenda(body);
-
-      if (tipo === 'vale') {
-        await registrarGastosBarPorVale();
+      if (comandaEmPagamento) {
+        await fecharComanda(label);
+      } else {
+        const recebido = parseFloat(valorRecebido) || finalTotal;
+        const body = montarBodyVenda({
+          paymentLabel: label,
+          amountReceived: tipo === 'dinheiro' ? recebido : finalTotal,
+          change: tipo === 'dinheiro' ? recebido - finalTotal : 0,
+          valePassword: tipo === 'vale' ? senhaVale : null,
+          pendenteClientId: tipo === 'fiado' ? clienteFiadoId : null,
+        });
+        await enviarVenda(body);
+        if (tipo === 'vale') {
+          await registrarGastosBarPorVale();
+        }
       }
 
-      Alert.alert('Sucesso', 'Venda finalizada!');
+      Alert.alert('Sucesso', comandaEmPagamento ? 'Comanda paga!' : 'Venda finalizada!');
       finalizarLimpeza();
     } catch (error) {
-      const msg = error.response?.data?.error || 'Erro ao finalizar venda';
+      const msg = error.response?.data?.error || 'Erro ao finalizar pagamento';
+      Alert.alert('Erro', msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Concretiza o pagamento após aprovação da máquina/Pix:
+  // fecha a comanda OU cria a venda e vincula à order.
+  const finalizarPagamentoAprovado = async (label, orderId) => {
+    setLoading(true);
+    try {
+      if (comandaEmPagamento) {
+        await fecharComanda(label);
+      } else {
+        const body = montarBodyVenda({ paymentLabel: label });
+        const sale = await enviarVenda(body);
+        if (orderId && sale?.id) {
+          try {
+            await api.patch(`/api/point/orders/${orderId}`, { saleId: sale.id });
+          } catch (e) {
+            console.log('Falha ao vincular venda à order (ignorado)');
+          }
+        }
+      }
+      Alert.alert('Sucesso', comandaEmPagamento ? 'Comanda paga!' : 'Venda finalizada!');
+      setPointVisible(false);
+      setPixVisible(false);
+      finalizarLimpeza();
+    } catch (error) {
+      const msg = error.response?.data?.error || 'Erro ao finalizar pagamento';
       Alert.alert('Erro', msg);
     } finally {
       setLoading(false);
@@ -303,13 +420,110 @@ export default function PDVScreen({ navigation }) {
   };
 
   const finalizarLimpeza = () => {
+    const eraComanda = !!comandaEmPagamento;
     setCarrinho([]);
     setCheckoutVisible(false);
     setValorRecebido('');
     setSenhaVale('');
     setClienteFiadoId(null);
     setDescontoValor('');
+    setComandaEmPagamento(null);
+    if (eraComanda) {
+      setSubTab('comandas');
+      carregarComandas();
+    }
     carregarProdutos();
+  };
+
+  // ---- Maquininha (Mercado Pago Point) ----
+  const iniciarPagamentoPoint = async (forma, amount, label) => {
+    setLoading(true);
+    try {
+      const res = await api.post('/api/point/orders', {
+        amount,
+        paymentType: forma.pointType || null, // "credit_card" | "debit_card" | null
+        description: `Venda PDV - ${carrinho.length} item(ns)`,
+        operator: user?.name || 'Operador',
+      });
+      pointOrderIdRef.current = res.data.id;
+      setPointOrder(res.data);
+      setPointStatus(res.data.status || 'waiting');
+      setCheckoutVisible(false);
+      setPointVisible(true);
+      iniciarPollingPoint(res.data.id, label);
+    } catch (error) {
+      const msg =
+        error.response?.data?.error || 'Não foi possível iniciar o pagamento na máquina';
+      Alert.alert('Erro', msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const iniciarPollingPoint = (orderId, label) => {
+    if (pointPollRef.current) clearInterval(pointPollRef.current);
+    pointPollRef.current = setInterval(async () => {
+      try {
+        const res = await api.get(`/api/point/orders/${orderId}`);
+        const status = res.data.status;
+        setPointStatus(status);
+        if (status === 'processed' || status === 'finished') {
+          clearInterval(pointPollRef.current);
+          await finalizarPagamentoAprovado(label, orderId);
+        } else if (['canceled', 'failed', 'expired', 'rejected'].includes(status)) {
+          clearInterval(pointPollRef.current);
+          Alert.alert('Máquina', 'Pagamento não concluído: ' + status);
+          setPointVisible(false);
+        }
+      } catch (error) {
+        console.error('Erro ao consultar pagamento da máquina:', error);
+      }
+    }, 3000);
+  };
+
+  const cancelarPoint = async () => {
+    if (pointPollRef.current) clearInterval(pointPollRef.current);
+    const orderId = pointOrderIdRef.current;
+    if (orderId) {
+      try {
+        await api.post(`/api/point/orders/${orderId}/cancel`, {});
+      } catch (e) {
+        /* ignora */
+      }
+    }
+    setPointVisible(false);
+    setPointOrder(null);
+  };
+
+  // ---- Saque (troco via máquina) ----
+  const saqueTaxaValor = (parseFloat(saqueValor) || 0) * (taxaSaque / 100);
+  const saqueCobrarMaquina = (parseFloat(saqueValor) || 0) + saqueTaxaValor;
+
+  const confirmarSaque = async () => {
+    const valor = parseFloat(saqueValor);
+    if (!valor || valor <= 0) {
+      Alert.alert('Atenção', 'Informe um valor de saque válido');
+      return;
+    }
+    const forma =
+      formasPagamento.find((f) => f.id === saqueFormaId) || formasPagamento[0] || {};
+    setSavingSaque(true);
+    try {
+      await api.post('/api/pdv-saque', {
+        valor,
+        observacao: saqueObs || null,
+        formaPagamento: forma?.valor || 'dinheiro',
+        formaPagamentoNome: forma?.nome || 'Dinheiro',
+      });
+      Alert.alert('Sucesso', 'Saque registrado!');
+      setSaqueValor('');
+      setSaqueObs('');
+    } catch (error) {
+      const msg = error.response?.data?.error || 'Erro ao registrar saque';
+      Alert.alert('Erro', msg);
+    } finally {
+      setSavingSaque(false);
+    }
   };
 
   // ---- Pix online ----
@@ -357,24 +571,7 @@ export default function PDVScreen({ navigation }) {
   };
 
   const concluirVendaPix = async (pixId, label) => {
-    setLoading(true);
-    try {
-      const body = montarBodyVenda({ paymentLabel: label, pendenteClientId: null });
-      const sale = await enviarVenda(body);
-      try {
-        await api.patch(`/api/point/orders/${pixId}`, { saleId: sale.id });
-      } catch (e) {
-        console.log('Falha ao vincular venda ao Pix (ignorado)');
-      }
-      Alert.alert('Sucesso', 'Pagamento Pix confirmado e venda finalizada!');
-      setPixVisible(false);
-      finalizarLimpeza();
-    } catch (error) {
-      const msg = error.response?.data?.error || 'Erro ao finalizar venda';
-      Alert.alert('Erro', msg);
-    } finally {
-      setLoading(false);
-    }
+    await finalizarPagamentoAprovado(label, pixId);
   };
 
   const cancelarPix = () => {
@@ -399,6 +596,47 @@ export default function PDVScreen({ navigation }) {
         <Appbar.Content title="PDV - Ponto de Venda" titleStyle={styles.headerTitle} />
       </Appbar.Header>
 
+      {/* Abas de sub-módulos (ações) */}
+      <View style={styles.subTabBar}>
+        <Chip
+          selected={subTab === 'venda'}
+          onPress={() => setSubTab('venda')}
+          style={styles.subTabChip}
+          icon="cart"
+        >
+          Venda
+        </Chip>
+        <Chip
+          selected={subTab === 'comandas'}
+          onPress={() => {
+            setSubTab('comandas');
+            carregarComandas();
+          }}
+          style={styles.subTabChip}
+          icon="receipt"
+        >
+          Comandas
+        </Chip>
+        <Chip
+          selected={subTab === 'saque'}
+          onPress={() => setSubTab('saque')}
+          style={styles.subTabChip}
+          icon="cash-multiple"
+        >
+          Saque
+        </Chip>
+        {isAdmin && (
+          <Chip
+            onPress={() => navigation.navigate('CashRegister')}
+            style={styles.subTabChip}
+            icon="cash-register"
+          >
+            Caixa
+          </Chip>
+        )}
+      </View>
+
+      {subTab === 'venda' && (
       <View style={styles.content}>
         <View style={styles.leftPanel}>
           <TextInput
@@ -494,6 +732,108 @@ export default function PDVScreen({ navigation }) {
           </Button>
         </View>
       </View>
+      )}
+
+      {/* Sub-módulo: Comandas */}
+      {subTab === 'comandas' && (
+        <ScrollView style={styles.subModuloContainer}>
+          <View style={styles.subModuloHeader}>
+            <Text style={styles.subModuloTitulo}>Comandas pendentes</Text>
+            <IconButton icon="refresh" iconColor="#fff" onPress={carregarComandas} />
+          </View>
+          {loadingComandas ? (
+            <ActivityIndicator size="large" color="#2196F3" style={{ marginTop: 24 }} />
+          ) : comandas.length === 0 ? (
+            <Text style={styles.subModuloVazio}>Nenhuma comanda pendente.</Text>
+          ) : (
+            comandas.map((comanda) => {
+              const totalComanda = (comanda.items || []).reduce(
+                (t, i) => t + (i.unitPrice ?? i.price ?? 0) * (i.quantity || 0),
+                0
+              );
+              return (
+                <Card key={comanda.id} style={styles.comandaCard}>
+                  <Card.Content>
+                    <Text style={styles.comandaCliente}>
+                      {comanda.clienteNome || comanda.customerName || `Comanda #${comanda.id}`}
+                    </Text>
+                    <Text style={styles.comandaInfo}>
+                      {(comanda.items || []).length} item(ns) · Total: R$ {totalComanda.toFixed(2)}
+                    </Text>
+                    <Button
+                      mode="contained"
+                      icon="cash"
+                      onPress={() => iniciarPagamentoComanda(comanda)}
+                      style={styles.comandaPagarBtn}
+                    >
+                      Pagar comanda
+                    </Button>
+                  </Card.Content>
+                </Card>
+              );
+            })
+          )}
+        </ScrollView>
+      )}
+
+      {/* Sub-módulo: Saque */}
+      {subTab === 'saque' && (
+        <ScrollView style={styles.subModuloContainer}>
+          <Text style={styles.subModuloTitulo}>Saque (troco via máquina)</Text>
+          <Card style={styles.saqueCard}>
+            <Card.Content>
+              <TextInput
+                label="Valor do saque (R$)"
+                mode="outlined"
+                keyboardType="numeric"
+                value={saqueValor}
+                onChangeText={setSaqueValor}
+                style={styles.saqueInput}
+              />
+              <Text style={styles.saqueInfo}>Taxa: {taxaSaque}%</Text>
+              {parseFloat(saqueValor) > 0 && (
+                <Text style={styles.saqueInfo}>
+                  Cobrar na máquina: R$ {saqueCobrarMaquina.toFixed(2)} (taxa R$ {saqueTaxaValor.toFixed(2)})
+                </Text>
+              )}
+
+              <Text style={styles.secaoLabel}>Forma de pagamento</Text>
+              <View style={styles.formasContainer}>
+                {formasPagamento.map((forma) => (
+                  <Chip
+                    key={forma.id}
+                    selected={saqueFormaId === forma.id}
+                    onPress={() => setSaqueFormaId(forma.id)}
+                    style={styles.formaChip}
+                    showSelectedCheck
+                  >
+                    {forma.nome}
+                  </Chip>
+                ))}
+              </View>
+
+              <TextInput
+                label="Observação (opcional)"
+                mode="outlined"
+                value={saqueObs}
+                onChangeText={setSaqueObs}
+                style={styles.saqueInput}
+              />
+
+              <Button
+                mode="contained"
+                icon="cash-multiple"
+                onPress={confirmarSaque}
+                loading={savingSaque}
+                disabled={savingSaque}
+                style={styles.saqueButton}
+              >
+                Registrar saque
+              </Button>
+            </Card.Content>
+          </Card>
+        </ScrollView>
+      )}
 
       {/* Modal de checkout */}
       <Portal>
@@ -503,7 +843,14 @@ export default function PDVScreen({ navigation }) {
           contentContainerStyle={styles.modalContent}
         >
           <ScrollView>
-            <Text style={styles.modalTitle}>Finalizar Venda</Text>
+            <Text style={styles.modalTitle}>
+              {comandaEmPagamento ? 'Pagar Comanda' : 'Finalizar Venda'}
+            </Text>
+            {comandaEmPagamento && (
+              <Text style={styles.comandaBanner}>
+                Comanda: {comandaEmPagamento.clienteNome || comandaEmPagamento.customerName || `#${comandaEmPagamento.id}`}
+              </Text>
+            )}
 
             <View style={styles.resumoLinha}>
               <Text style={styles.resumoTexto}>Subtotal:</Text>
@@ -677,6 +1024,35 @@ export default function PDVScreen({ navigation }) {
             </Text>
           </View>
           <Button mode="outlined" onPress={cancelarPix} textColor="#fff" style={{ marginTop: 12 }}>
+            Cancelar
+          </Button>
+        </Modal>
+
+        {/* Modal Maquininha (Point) */}
+        <Modal
+          visible={pointVisible}
+          onDismiss={cancelarPoint}
+          contentContainerStyle={styles.modalContent}
+        >
+          <Text style={styles.modalTitle}>Pagamento na Máquina</Text>
+          <ActivityIndicator size="large" color="#2196F3" style={{ margin: 20 }} />
+          <Text style={styles.pointInfo}>
+            {pointOrder?.paymentType === 'credit_card'
+              ? 'Crédito'
+              : pointOrder?.paymentType === 'debit_card'
+              ? 'Débito'
+              : 'Aguardando seleção no terminal'}
+          </Text>
+          <Text style={styles.pointValor}>
+            R$ {Number(pointOrder?.amount || calcularTotalFinal()).toFixed(2)}
+          </Text>
+          <View style={styles.pixStatusRow}>
+            <ActivityIndicator size="small" color="#ffeb3b" />
+            <Text style={styles.pixStatusTexto}>
+              Aguardando pagamento... ({pointStatus})
+            </Text>
+          </View>
+          <Button mode="outlined" onPress={cancelarPoint} textColor="#fff" style={{ marginTop: 12 }}>
             Cancelar
           </Button>
         </Modal>
@@ -921,5 +1297,86 @@ const styles = StyleSheet.create({
   pixStatusTexto: {
     color: '#ffeb3b',
     marginLeft: 8,
+  },
+  subTabBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: '#1a1a1a',
+  },
+  subTabChip: {
+    marginRight: 6,
+    marginBottom: 4,
+  },
+  subModuloContainer: {
+    flex: 1,
+    padding: 12,
+  },
+  subModuloHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  subModuloTitulo: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  subModuloVazio: {
+    color: '#999',
+    fontStyle: 'italic',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  comandaCard: {
+    marginBottom: 10,
+    backgroundColor: '#1a1a1a',
+  },
+  comandaCliente: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  comandaInfo: {
+    color: '#bbb',
+    marginTop: 2,
+    marginBottom: 8,
+  },
+  comandaPagarBtn: {
+    backgroundColor: '#4CAF50',
+  },
+  comandaBanner: {
+    color: '#4CAF50',
+    marginBottom: 8,
+    fontWeight: 'bold',
+  },
+  saqueCard: {
+    backgroundColor: '#1a1a1a',
+  },
+  saqueInput: {
+    marginBottom: 10,
+    backgroundColor: '#1a1a1a',
+  },
+  saqueInfo: {
+    color: '#bbb',
+    marginBottom: 6,
+  },
+  saqueButton: {
+    marginTop: 12,
+    backgroundColor: '#FF9800',
+  },
+  pointInfo: {
+    color: '#fff',
+    textAlign: 'center',
+    fontSize: 16,
+  },
+  pointValor: {
+    color: '#4CAF50',
+    textAlign: 'center',
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginTop: 4,
   },
 });

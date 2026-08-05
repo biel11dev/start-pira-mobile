@@ -17,6 +17,8 @@ import ProductListScreen from '../screens/ProductListScreen';
 import PontoScreen from '../screens/PontoScreen';
 import AcessosScreen from '../screens/AcessosScreen';
 import EstoqueScreen from '../screens/EstoqueScreen';
+import ListaComprasScreen from '../screens/ListaComprasScreen';
+import AuditoriaScreen from '../screens/AuditoriaScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -47,6 +49,8 @@ export default function Routes() {
             <Stack.Screen name='Ponto' component={PontoScreen} />
             <Stack.Screen name='Acessos' component={AcessosScreen} />
             <Stack.Screen name='Estoque' component={EstoqueScreen} />
+            <Stack.Screen name='ListaCompras' component={ListaComprasScreen} />
+            <Stack.Screen name='Auditoria' component={AuditoriaScreen} />
           </>
         ) : (
           <>

@@ -19,7 +19,8 @@ export default function HomeScreen({ navigation }) {
 
   const menuItems = [
     { title: 'CAIXA', icon: 'cash-multiple', screen: 'CashRegister', color: '#2196F3', permission: 'caixa' },
-    { title: 'LISTA DE COMPRAS', icon: 'cart', screen: 'ProductList', color: '#2196F3', permission: 'produtos' },
+    { title: 'BASE DE CADASTRO', icon: 'clipboard-list', screen: 'ProductList', color: '#2196F3', permission: 'produtos' },
+    { title: 'LISTA DE COMPRAS', icon: 'cart', screen: 'ListaCompras', color: '#4CAF50', permission: 'produtos' },
     { title: 'FIADO', icon: 'notebook', screen: 'Fiado', color: '#FF9800', permission: 'fiado' },
     { title: 'DESPESAS', icon: 'receipt', screen: 'Despesa', color: '#F44336', permission: 'despesas' },
     { title: 'PONTO', icon: 'clock-outline', screen: 'Ponto', color: '#FF5722', permission: 'ponto' },
@@ -27,6 +28,7 @@ export default function HomeScreen({ navigation }) {
     { title: 'ESTOQUE', icon: 'package-variant', screen: 'Estoque', color: '#8BC34A', permission: 'base_produto' },
     { title: 'PDV', icon: 'cash-register', screen: 'PDV', color: '#00BCD4', permission: 'pdv' },
     { title: 'PESSOAL', icon: 'wallet', screen: 'Pessoal', color: '#E91E63', permission: 'pessoal' },
+    { title: 'AUDITORIA', icon: 'shield-search', screen: 'Auditoria', color: '#607D8B', permission: 'auditoria' },
   ];
 
   // Filtrar módulos baseado nas permissões do usuário

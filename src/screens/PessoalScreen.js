@@ -82,18 +82,39 @@ export default function PessoalScreen({ navigation }) {
 
     setSaving(true);
     try {
+      const catId = categoriaId ? parseInt(categoriaId) : null;
+      const valeMarcado = isVale === 'Sim';
+
       await api.post('/api/desp-pessoal', {
         nomeDespesa: nomeDespesa || 'Sem descrição',
         valorDespesa: parseFloat(valorDespesa),
         descDespesa: descDespesa || null,
         date: dataDespesa,
         DespesaFixa: despesaFixa === 'Fixa',
-        categoriaId: categoriaId ? parseInt(categoriaId) : null,
+        categoriaId: catId,
         tipoMovimento,
-        isVale: isVale === 'Sim',
+        isVale: valeMarcado,
       });
 
-      Alert.alert('Sucesso', 'Despesa registrada!');
+      // Se for GASTO com VALE marcado, criar também um GANHO "VALE"
+      if (tipoMovimento === 'GASTO' && valeMarcado) {
+        try {
+          await api.post('/api/desp-pessoal', {
+            nomeDespesa: 'VALE',
+            valorDespesa: parseFloat(valorDespesa),
+            descDespesa: `Vale referente a: ${nomeDespesa || 'Sem descrição'}`,
+            date: dataDespesa,
+            DespesaFixa: false,
+            categoriaId: catId,
+            tipoMovimento: 'GANHO',
+            isVale: true,
+          });
+        } catch (valeErr) {
+          console.error('Erro ao adicionar VALE (GANHO):', valeErr);
+        }
+      }
+
+      Alert.alert('Sucesso', valeMarcado ? 'Despesa e VALE adicionados!' : 'Despesa registrada!');
       setModalVisible(false);
       limparForm();
       carregarDados();

@@ -18,161 +18,284 @@ import {
   Chip,
   Menu,
   Divider,
+  IconButton,
+  ActivityIndicator,
+  SegmentedButtons,
 } from 'react-native-paper';
 import api from '../services/api';
 
 export default function EstoqueScreen({ navigation }) {
-  const [produtos, setProdutos] = useState([]);
-  const [categorias, setCategorias] = useState([]);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [modalDetalhes, setModalDetalhes] = useState(false);
-  const [produtoSelecionado, setProdutoSelecionado] = useState(null);
+  const [estoque, setEstoque] = useState([]);
+  const [minimoMap, setMinimoMap] = useState({}); // estoqueId -> quantidadeMinima
+  const [catalogo, setCatalogo] = useState([]); // /api/products
   const [busca, setBusca] = useState('');
   const [loading, setLoading] = useState(false);
-  const [menuVisible, setMenuVisible] = useState(false);
 
-  // Form fields
-  const [name, setName] = useState('');
-  const [quantity, setQuantity] = useState('');
-  const [unit, setUnit] = useState('un');
-  const [value, setValue] = useState('');
-  const [valueCusto, setValueCusto] = useState('');
-  const [categoryId, setCategoryId] = useState(null);
+  // Entrada de estoque (sem preço)
+  const [entradaVisible, setEntradaVisible] = useState(false);
+  const [entradaProduto, setEntradaProduto] = useState(null);
+  const [entradaBusca, setEntradaBusca] = useState('');
+  const [entradaQuantidade, setEntradaQuantidade] = useState('');
+  const [entradaUnidade, setEntradaUnidade] = useState('un');
+  const [savingEntrada, setSavingEntrada] = useState(false);
+
+  // Quantidade ideal (mínimo)
+  const [minimoVisible, setMinimoVisible] = useState(false);
+  const [minimoItem, setMinimoItem] = useState(null);
+  const [minimoValor, setMinimoValor] = useState('');
+  const [savingMinimo, setSavingMinimo] = useState(false);
+
+  // Conversão manual
+  const [convVisible, setConvVisible] = useState(false);
+  const [convItem, setConvItem] = useState(null);
+  const [convModo, setConvModo] = useState('base'); // 'base' | 'empacotar'
+  const [convQuantidade, setConvQuantidade] = useState('');
+  const [convUnidadeAlvo, setConvUnidadeAlvo] = useState('');
+  const [savingConv, setSavingConv] = useState(false);
+
+  // Componente (composição)
+  const [compVisible, setCompVisible] = useState(false);
+  const [compItem, setCompItem] = useState(null);
+  const [composicoes, setComposicoes] = useState([]);
+  const [loadingComp, setLoadingComp] = useState(false);
+  const [novaCompNome, setNovaCompNome] = useState('');
+  const [novaCompObrigatorio, setNovaCompObrigatorio] = useState(false);
+  const [savingComp, setSavingComp] = useState(false);
+  const [opcaoBusca, setOpcaoBusca] = useState('');
+  const [opcaoGrupoId, setOpcaoGrupoId] = useState(null);
 
   useEffect(() => {
-    carregarProdutos();
-    carregarCategorias();
+    carregarTudo();
   }, []);
 
-  const carregarProdutos = async () => {
+  const carregarTudo = async () => {
+    setLoading(true);
     try {
-      console.log('🔵 Carregando estoque...');
-      const response = await api.get('/api/products');
-      console.log('✅ Estoque carregado:', response.data);
-      setProdutos(response.data || []);
+      const [est, min, cat] = await Promise.all([
+        api.get('/api/estoque_prod'),
+        api.get('/api/estoque-minimo'),
+        api.get('/api/products'),
+      ]);
+      setEstoque(est.data || []);
+      const mmap = {};
+      (min.data || []).forEach((m) => {
+        mmap[m.estoqueId] = m.quantidadeMinima;
+      });
+      setMinimoMap(mmap);
+      setCatalogo(cat.data || []);
     } catch (error) {
       console.error('❌ Erro ao carregar estoque:', error);
       Alert.alert('Erro', 'Não foi possível carregar o estoque');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const carregarCategorias = async () => {
-    try {
-      const response = await api.get('/api/categories/all');
-      setCategorias(response.data || []);
-    } catch (error) {
-      console.error('Erro ao carregar categorias:', error);
-    }
+  const estaEmFalta = (item) => {
+    const qtd = item.quantity ?? 0;
+    const min = minimoMap[item.id];
+    if (min != null) return qtd <= min;
+    return qtd <= 0;
   };
 
-  const adicionarProduto = async () => {
-    if (!name || !quantity || !unit || !value || !valueCusto) {
-      Alert.alert('Atenção', 'Preencha todos os campos obrigatórios');
+  // ===== Entrada de estoque (sem preço de custo/venda) =====
+  const abrirEntrada = () => {
+    setEntradaProduto(null);
+    setEntradaBusca('');
+    setEntradaQuantidade('');
+    setEntradaUnidade('un');
+    setEntradaVisible(true);
+  };
+
+  const confirmarEntrada = async () => {
+    if (!entradaProduto || !entradaQuantidade || !entradaUnidade) {
+      Alert.alert('Atenção', 'Selecione o produto, informe a quantidade e a unidade.');
       return;
     }
-
-    setLoading(true);
+    setSavingEntrada(true);
     try {
-      await api.post('/api/products', {
-        name,
-        quantity: parseInt(quantity),
-        unit,
-        value: parseFloat(value),
-        valuecusto: parseFloat(valueCusto),
-        categoryId: categoryId || null,
+      await api.post('/api/estoque_prod/entrada', {
+        productId: entradaProduto.id,
+        quantity: parseInt(entradaQuantidade, 10),
+        unit: entradaUnidade,
       });
-
-      Alert.alert('Sucesso', 'Produto adicionado ao estoque!');
-      setModalVisible(false);
-      limparForm();
-      carregarProdutos();
+      Alert.alert('Sucesso', 'Entrada registrada no estoque!');
+      setEntradaVisible(false);
+      carregarTudo();
     } catch (error) {
-      Alert.alert('Erro', error.response?.data?.error || 'Erro ao adicionar produto');
-      console.error(error);
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao dar entrada');
     } finally {
-      setLoading(false);
+      setSavingEntrada(false);
     }
   };
 
-  const atualizarProduto = async () => {
-    if (!produtoSelecionado) return;
+  // ===== Quantidade ideal (mínimo) =====
+  const abrirMinimo = (item) => {
+    setMinimoItem(item);
+    setMinimoValor(minimoMap[item.id] != null ? String(minimoMap[item.id]) : '');
+    setMinimoVisible(true);
+  };
 
-    setLoading(true);
+  const salvarMinimo = async () => {
+    if (!minimoItem) return;
+    const valor = parseFloat(minimoValor);
+    setSavingMinimo(true);
     try {
-      await api.put(`/api/products/${produtoSelecionado.id}`, {
-        name,
-        quantity: parseInt(quantity),
-        unit,
-        value: parseFloat(value),
-        valuecusto: parseFloat(valueCusto),
-        categoryId: categoryId || null,
-      });
-
-      Alert.alert('Sucesso', 'Produto atualizado!');
-      setModalDetalhes(false);
-      carregarProdutos();
+      if (!minimoValor || isNaN(valor) || valor <= 0) {
+        await api.delete(`/api/estoque-minimo/${minimoItem.id}`);
+        Alert.alert('Sucesso', 'Quantidade ideal removida.');
+      } else {
+        await api.post('/api/estoque-minimo', {
+          estoqueId: minimoItem.id,
+          quantidadeMinima: valor,
+        });
+        Alert.alert('Sucesso', 'Quantidade ideal definida.');
+      }
+      setMinimoVisible(false);
+      carregarTudo();
     } catch (error) {
-      Alert.alert('Erro', 'Erro ao atualizar produto');
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao salvar quantidade ideal');
     } finally {
-      setLoading(false);
+      setSavingMinimo(false);
     }
   };
 
-  const excluirProduto = async (id) => {
-    Alert.alert(
-      'Confirmar Exclusão',
-      'Deseja realmente excluir este produto?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Excluir',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await api.delete(`/api/products/${id}`);
-              Alert.alert('Sucesso', 'Produto excluído!');
-              carregarProdutos();
-              setModalDetalhes(false);
-            } catch (error) {
-              Alert.alert('Erro', 'Erro ao excluir produto');
-            }
-          },
-        },
-      ]
-    );
+  // ===== Conversão manual =====
+  const abrirConversao = (item) => {
+    setConvItem(item);
+    setConvModo('base');
+    setConvQuantidade('');
+    setConvUnidadeAlvo('');
+    setConvVisible(true);
   };
 
-  const verDetalhes = (produto) => {
-    setProdutoSelecionado(produto);
-    setName(produto.name);
-    setQuantity(produto.quantity.toString());
-    setUnit(produto.unit);
-    setValue(produto.value.toString());
-    setValueCusto(produto.valuecusto.toString());
-    setCategoryId(produto.categoryId);
-    setModalDetalhes(true);
+  const confirmarConversao = async () => {
+    if (!convItem || !convQuantidade) {
+      Alert.alert('Atenção', 'Informe a quantidade a converter.');
+      return;
+    }
+    setSavingConv(true);
+    try {
+      if (convModo === 'base') {
+        await api.post('/api/estoque_prod/converter', {
+          estoqueId: convItem.id,
+          quantityToConvert: parseInt(convQuantidade, 10),
+        });
+      } else {
+        if (!convUnidadeAlvo) {
+          Alert.alert('Atenção', 'Informe a unidade de destino (ex: fardo, caixa).');
+          setSavingConv(false);
+          return;
+        }
+        await api.post('/api/estoque_prod/converter-reverso', {
+          estoqueId: convItem.id,
+          targetUnit: convUnidadeAlvo,
+          quantityPacked: parseInt(convQuantidade, 10),
+        });
+      }
+      Alert.alert('Sucesso', 'Conversão realizada!');
+      setConvVisible(false);
+      carregarTudo();
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro na conversão');
+    } finally {
+      setSavingConv(false);
+    }
   };
 
-  const limparForm = () => {
-    setName('');
-    setQuantity('');
-    setUnit('un');
-    setValue('');
-    setValueCusto('');
-    setCategoryId(null);
+  // ===== Componente (composição) =====
+  const abrirComponente = async (item) => {
+    setCompItem(item);
+    setNovaCompNome('');
+    setNovaCompObrigatorio(false);
+    setOpcaoBusca('');
+    setOpcaoGrupoId(null);
+    setCompVisible(true);
+    await carregarComposicoes(item.id);
   };
 
-  const produtosFiltrados = produtos.filter(
+  const carregarComposicoes = async (estoqueId) => {
+    setLoadingComp(true);
+    try {
+      const resp = await api.get(`/api/composicoes/${estoqueId}`);
+      setComposicoes(resp.data || []);
+    } catch (error) {
+      console.error('Erro ao carregar composições:', error);
+      setComposicoes([]);
+    } finally {
+      setLoadingComp(false);
+    }
+  };
+
+  const adicionarGrupoComponente = async () => {
+    if (!compItem || !novaCompNome.trim()) {
+      Alert.alert('Atenção', 'Informe o nome do componente.');
+      return;
+    }
+    setSavingComp(true);
+    try {
+      await api.post('/api/composicoes', {
+        estoqueId: compItem.id,
+        nome: novaCompNome.trim(),
+        descricao: '',
+        obrigatorio: novaCompObrigatorio,
+        multiplo: false,
+        minOpcoes: novaCompObrigatorio ? 1 : 0,
+        maxOpcoes: 1,
+        ordem: composicoes.length,
+      });
+      setNovaCompNome('');
+      setNovaCompObrigatorio(false);
+      await carregarComposicoes(compItem.id);
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao criar componente');
+    } finally {
+      setSavingComp(false);
+    }
+  };
+
+  const removerGrupoComponente = async (grupoId) => {
+    try {
+      await api.delete(`/api/composicoes/${grupoId}`);
+      await carregarComposicoes(compItem.id);
+    } catch (error) {
+      Alert.alert('Erro', 'Erro ao remover componente');
+    }
+  };
+
+  const adicionarOpcaoComponente = async (grupoId, estoqueOpcao) => {
+    try {
+      await api.post(`/api/composicoes/${grupoId}/opcoes`, {
+        nome: estoqueOpcao.name,
+        valorExtra: 0,
+        estoqueId: estoqueOpcao.id,
+      });
+      setOpcaoBusca('');
+      setOpcaoGrupoId(null);
+      await carregarComposicoes(compItem.id);
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao adicionar opção');
+    }
+  };
+
+  const estoqueFiltrado = estoque.filter(
     (p) =>
       p.name?.toLowerCase().includes(busca.toLowerCase()) ||
       p.id?.toString().includes(busca)
   );
 
-  const calcularLucro = (venda, custo) => {
-    const lucro = venda - custo;
-    const percentual = ((lucro / custo) * 100).toFixed(1);
-    return { lucro, percentual };
-  };
+  const itensEmFalta = estoque.filter((p) => estaEmFalta(p));
+
+  const catalogoFiltrado = catalogo.filter((p) =>
+    p.name?.toLowerCase().includes(entradaBusca.toLowerCase())
+  );
+
+  const opcoesEstoqueFiltradas = estoque.filter(
+    (p) =>
+      compItem &&
+      p.id !== compItem.id &&
+      p.name?.toLowerCase().includes(opcaoBusca.toLowerCase())
+  );
 
   return (
     <View style={styles.container}>
@@ -193,102 +316,172 @@ export default function EstoqueScreen({ navigation }) {
         />
 
         <ScrollView style={styles.lista}>
-          {produtosFiltrados.length === 0 ? (
-            <Text style={styles.semDados}>Nenhum produto no estoque</Text>
+          {loading && estoque.length === 0 ? (
+            <ActivityIndicator style={{ marginTop: 24 }} color="#2196F3" />
           ) : (
-            produtosFiltrados.map((produto) => {
-              const { lucro, percentual } = calcularLucro(produto.value, produto.valuecusto);
-              return (
-                <Card
-                  key={produto.id}
-                  style={styles.produtoCard}
-                  onPress={() => verDetalhes(produto)}
-                >
+            <>
+              {itensEmFalta.length > 0 && (
+                <Card style={styles.faltaCard}>
                   <Card.Content>
-                    <View style={styles.produtoHeader}>
-                      <View style={styles.produtoInfo}>
-                        <Text style={styles.produtoNome}>{produto.name}</Text>
-                        {produto.category && (
-                          <Text style={styles.produtoCategoria}>
-                            {produto.category.name}
-                          </Text>
-                        )}
-                      </View>
-                    </View>
-
-                    <View style={styles.produtoPrecos}>
-                      <View style={styles.precoItem}>
-                        <Text style={styles.precoLabel}>Custo:</Text>
-                        <Text style={styles.precoCusto}>
-                          R$ {produto.valuecusto?.toFixed(2)}
-                        </Text>
-                      </View>
-                      <View style={styles.precoItem}>
-                        <Text style={styles.precoLabel}>Venda:</Text>
-                        <Text style={styles.precoVenda}>
-                          R$ {produto.value?.toFixed(2)}
-                        </Text>
-                      </View>
-                      <View style={styles.precoItem}>
-                        <Text style={styles.precoLabel}>Lucro:</Text>
-                        <Text style={styles.precoLucro}>
-                          R$ {lucro.toFixed(2)} ({percentual}%)
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.produtoFooter}>
-                      <Chip
-                        mode="outlined"
-                        icon="package-variant"
-                        style={[
-                          styles.estoqueChip,
-                          produto.quantity <= 5 ? styles.estoqueBaixo : {},
-                        ]}
-                        textStyle={{ color: produto.quantity <= 5 ? '#FF5722' : '#2196F3' }}
-                      >
-                        Estoque: {produto.quantity} {produto.unit}
+                    <View style={styles.faltaHeader}>
+                      <Text style={styles.faltaTitulo}>⚠️ Falta no Estoque</Text>
+                      <Chip style={styles.faltaBadge} textStyle={{ color: '#fff' }}>
+                        {itensEmFalta.length}
                       </Chip>
                     </View>
+                    {itensEmFalta.map((item) => (
+                      <View key={`falta-${item.id}`} style={styles.faltaItem}>
+                        <Text style={styles.faltaItemNome}>{item.name}</Text>
+                        <Text style={styles.faltaItemQtd}>
+                          {item.quantity} {item.unit}
+                          {minimoMap[item.id] != null ? ` / ideal ${minimoMap[item.id]}` : ''}
+                        </Text>
+                      </View>
+                    ))}
                   </Card.Content>
                 </Card>
-              );
-            })
+              )}
+
+              {estoqueFiltrado.length === 0 ? (
+                <Text style={styles.semDados}>Nenhum item no estoque</Text>
+              ) : (
+                estoqueFiltrado.map((produto) => {
+                  const emFalta = estaEmFalta(produto);
+                  const min = minimoMap[produto.id];
+                  return (
+                    <Card key={produto.id} style={styles.produtoCard}>
+                      <Card.Content>
+                        <View style={styles.produtoHeader}>
+                          <View style={styles.produtoInfo}>
+                            <Text style={styles.produtoNome}>{produto.name}</Text>
+                            {produto.category && (
+                              <Text style={styles.produtoCategoria}>
+                                {produto.category.name}
+                              </Text>
+                            )}
+                          </View>
+                          <Chip
+                            mode="outlined"
+                            icon="package-variant"
+                            style={[styles.estoqueChip, emFalta ? styles.estoqueBaixo : {}]}
+                            textStyle={{ color: emFalta ? '#FF5722' : '#2196F3' }}
+                          >
+                            {produto.quantity} {produto.unit}
+                          </Chip>
+                        </View>
+
+                        {min != null && (
+                          <Text style={styles.idealTexto}>Quantidade ideal: {min}</Text>
+                        )}
+
+                        <Divider style={styles.divider} />
+
+                        <View style={styles.acoesRow}>
+                          <Button
+                            compact
+                            mode="text"
+                            icon="target"
+                            textColor="#2196F3"
+                            onPress={() => abrirMinimo(produto)}
+                          >
+                            Ideal
+                          </Button>
+                          <Button
+                            compact
+                            mode="text"
+                            icon="swap-horizontal"
+                            textColor="#4CAF50"
+                            onPress={() => abrirConversao(produto)}
+                          >
+                            Conversão
+                          </Button>
+                          <Button
+                            compact
+                            mode="text"
+                            icon="puzzle"
+                            textColor="#FF9800"
+                            onPress={() => abrirComponente(produto)}
+                          >
+                            Componente
+                          </Button>
+                        </View>
+                      </Card.Content>
+                    </Card>
+                  );
+                })
+              )}
+            </>
           )}
+          <View style={{ height: 80 }} />
         </ScrollView>
       </View>
 
       <FAB
         style={styles.fab}
         icon="plus"
-        onPress={() => {
-          limparForm();
-          setModalVisible(true);
-        }}
+        label="Entrada"
+        onPress={abrirEntrada}
       />
 
       <Portal>
+        {/* ===== Modal: Entrada de estoque (sem preço) ===== */}
         <Modal
-          visible={modalVisible}
-          onDismiss={() => setModalVisible(false)}
+          visible={entradaVisible}
+          onDismiss={() => setEntradaVisible(false)}
           contentContainerStyle={styles.modal}
         >
           <ScrollView>
-            <Text style={styles.modalTitle}>Novo Produto</Text>
+            <Text style={styles.modalTitle}>Dar Entrada no Estoque</Text>
 
-            <TextInput
-              label="Nome do Produto *"
-              value={name}
-              onChangeText={setName}
-              mode="outlined"
-              style={styles.input}
-              theme={{ colors: { background: '#2a2a2a' } }}
-            />
+            {entradaProduto ? (
+              <Card style={styles.selecionadoCard}>
+                <Card.Content style={styles.selecionadoContent}>
+                  <Text style={styles.selecionadoNome}>{entradaProduto.name}</Text>
+                  <IconButton
+                    icon="close"
+                    size={18}
+                    iconColor="#FF5722"
+                    onPress={() => setEntradaProduto(null)}
+                  />
+                </Card.Content>
+              </Card>
+            ) : (
+              <>
+                <TextInput
+                  label="Buscar produto no catálogo"
+                  value={entradaBusca}
+                  onChangeText={setEntradaBusca}
+                  mode="outlined"
+                  style={styles.input}
+                  theme={{ colors: { background: '#2a2a2a' } }}
+                />
+                <View style={styles.pickerLista}>
+                  {catalogoFiltrado.slice(0, 30).map((p) => (
+                    <Button
+                      key={p.id}
+                      mode="text"
+                      textColor="#fff"
+                      style={styles.pickerItem}
+                      contentStyle={{ justifyContent: 'flex-start' }}
+                      onPress={() => {
+                        setEntradaProduto(p);
+                        setEntradaUnidade(p.unit || 'un');
+                      }}
+                    >
+                      {p.name}
+                    </Button>
+                  ))}
+                  {catalogoFiltrado.length === 0 && (
+                    <Text style={styles.semDados}>Nenhum produto encontrado</Text>
+                  )}
+                </View>
+              </>
+            )}
 
             <TextInput
               label="Quantidade *"
-              value={quantity}
-              onChangeText={setQuantity}
+              value={entradaQuantidade}
+              onChangeText={setEntradaQuantidade}
               mode="outlined"
               keyboardType="number-pad"
               style={styles.input}
@@ -297,141 +490,267 @@ export default function EstoqueScreen({ navigation }) {
 
             <TextInput
               label="Unidade *"
-              value={unit}
-              onChangeText={setUnit}
+              value={entradaUnidade}
+              onChangeText={setEntradaUnidade}
               mode="outlined"
-              placeholder="un, kg, l, etc"
+              placeholder="un, kg, l, fardo, caixa..."
               style={styles.input}
               theme={{ colors: { background: '#2a2a2a' } }}
             />
 
-            <TextInput
-              label="Preço de Custo *"
-              value={valueCusto}
-              onChangeText={setValueCusto}
-              mode="outlined"
-              keyboardType="decimal-pad"
-              style={styles.input}
-              theme={{ colors: { background: '#2a2a2a' } }}
-            />
-
-            <TextInput
-              label="Preço de Venda *"
-              value={value}
-              onChangeText={setValue}
-              mode="outlined"
-              keyboardType="decimal-pad"
-              style={styles.input}
-              theme={{ colors: { background: '#2a2a2a' } }}
-            />
+            <Text style={styles.dica}>
+              A entrada não pede preço de custo/venda — os valores vêm do cadastro do produto.
+            </Text>
 
             <View style={styles.modalButtons}>
               <Button
                 mode="outlined"
-                onPress={() => setModalVisible(false)}
+                onPress={() => setEntradaVisible(false)}
                 style={styles.modalButton}
+                textColor="#fff"
               >
                 Cancelar
               </Button>
               <Button
                 mode="contained"
-                onPress={adicionarProduto}
-                loading={loading}
-                disabled={loading}
+                onPress={confirmarEntrada}
+                loading={savingEntrada}
+                disabled={savingEntrada}
                 style={styles.modalButton}
               >
-                Adicionar
+                Registrar
               </Button>
             </View>
           </ScrollView>
         </Modal>
 
+        {/* ===== Modal: Quantidade ideal ===== */}
         <Modal
-          visible={modalDetalhes}
-          onDismiss={() => setModalDetalhes(false)}
+          visible={minimoVisible}
+          onDismiss={() => setMinimoVisible(false)}
           contentContainerStyle={styles.modal}
         >
-          {produtoSelecionado && (
-            <ScrollView>
-              <Text style={styles.modalTitle}>Editar Produto</Text>
+          <ScrollView>
+            <Text style={styles.modalTitle}>Quantidade Ideal</Text>
+            {minimoItem && (
+              <Text style={styles.dica}>
+                {minimoItem.name} — atual: {minimoItem.quantity} {minimoItem.unit}
+              </Text>
+            )}
+            <TextInput
+              label="Quantidade ideal (mínimo)"
+              value={minimoValor}
+              onChangeText={setMinimoValor}
+              mode="outlined"
+              keyboardType="decimal-pad"
+              style={styles.input}
+              theme={{ colors: { background: '#2a2a2a' } }}
+            />
+            <Text style={styles.dica}>
+              Ao ficar abaixo do ideal, o item entra na Lista de Compras. Deixe 0 ou vazio para remover.
+            </Text>
+            <View style={styles.modalButtons}>
+              <Button
+                mode="outlined"
+                onPress={() => setMinimoVisible(false)}
+                style={styles.modalButton}
+                textColor="#fff"
+              >
+                Cancelar
+              </Button>
+              <Button
+                mode="contained"
+                onPress={salvarMinimo}
+                loading={savingMinimo}
+                disabled={savingMinimo}
+                style={styles.modalButton}
+              >
+                Salvar
+              </Button>
+            </View>
+          </ScrollView>
+        </Modal>
 
+        {/* ===== Modal: Conversão manual ===== */}
+        <Modal
+          visible={convVisible}
+          onDismiss={() => setConvVisible(false)}
+          contentContainerStyle={styles.modal}
+        >
+          <ScrollView>
+            <Text style={styles.modalTitle}>Conversão Manual</Text>
+            {convItem && (
+              <Text style={styles.dica}>
+                {convItem.name} — {convItem.quantity} {convItem.unit}
+              </Text>
+            )}
+            <SegmentedButtons
+              value={convModo}
+              onValueChange={setConvModo}
+              style={{ marginBottom: 12 }}
+              buttons={[
+                { value: 'base', label: 'Desmembrar' },
+                { value: 'empacotar', label: 'Empacotar' },
+              ]}
+            />
+            <TextInput
+              label={convModo === 'base' ? 'Qtd. a desmembrar' : 'Qtd. de pacotes'}
+              value={convQuantidade}
+              onChangeText={setConvQuantidade}
+              mode="outlined"
+              keyboardType="number-pad"
+              style={styles.input}
+              theme={{ colors: { background: '#2a2a2a' } }}
+            />
+            {convModo === 'empacotar' && (
               <TextInput
-                label="Nome do Produto *"
-                value={name}
-                onChangeText={setName}
+                label="Unidade de destino (fardo, caixa...)"
+                value={convUnidadeAlvo}
+                onChangeText={setConvUnidadeAlvo}
                 mode="outlined"
                 style={styles.input}
                 theme={{ colors: { background: '#2a2a2a' } }}
               />
-
-              <TextInput
-                label="Quantidade *"
-                value={quantity}
-                onChangeText={setQuantity}
+            )}
+            <Text style={styles.dica}>
+              {convModo === 'base'
+                ? 'Transforma pacotes/fardos em unidades base.'
+                : 'Agrupa unidades base em pacotes/fardos.'}
+            </Text>
+            <View style={styles.modalButtons}>
+              <Button
                 mode="outlined"
-                keyboardType="number-pad"
-                style={styles.input}
-                theme={{ colors: { background: '#2a2a2a' } }}
-              />
+                onPress={() => setConvVisible(false)}
+                style={styles.modalButton}
+                textColor="#fff"
+              >
+                Cancelar
+              </Button>
+              <Button
+                mode="contained"
+                onPress={confirmarConversao}
+                loading={savingConv}
+                disabled={savingConv}
+                style={styles.modalButton}
+              >
+                Converter
+              </Button>
+            </View>
+          </ScrollView>
+        </Modal>
 
-              <TextInput
-                label="Unidade *"
-                value={unit}
-                onChangeText={setUnit}
-                mode="outlined"
-                style={styles.input}
-                theme={{ colors: { background: '#2a2a2a' } }}
-              />
+        {/* ===== Modal: Componente (composição) ===== */}
+        <Modal
+          visible={compVisible}
+          onDismiss={() => setCompVisible(false)}
+          contentContainerStyle={styles.modal}
+        >
+          <ScrollView>
+            <Text style={styles.modalTitle}>Componentes</Text>
+            {compItem && <Text style={styles.dica}>{compItem.name}</Text>}
 
-              <TextInput
-                label="Preço de Custo *"
-                value={valueCusto}
-                onChangeText={setValueCusto}
-                mode="outlined"
-                keyboardType="decimal-pad"
-                style={styles.input}
-                theme={{ colors: { background: '#2a2a2a' } }}
-              />
+            {loadingComp ? (
+              <ActivityIndicator style={{ marginVertical: 16 }} color="#2196F3" />
+            ) : (
+              composicoes.map((grupo) => (
+                <Card key={grupo.id} style={styles.grupoCard}>
+                  <Card.Content>
+                    <View style={styles.grupoHeader}>
+                      <Text style={styles.grupoNome}>
+                        {grupo.nome} {grupo.obrigatorio ? '(obrigatório)' : ''}
+                      </Text>
+                      <IconButton
+                        icon="delete"
+                        size={18}
+                        iconColor="#FF5722"
+                        onPress={() => removerGrupoComponente(grupo.id)}
+                      />
+                    </View>
+                    {(grupo.opcoes || []).map((op) => (
+                      <Text key={op.id} style={styles.opcaoTexto}>
+                        • {op.nome}
+                        {op.valorExtra ? ` (+R$ ${Number(op.valorExtra).toFixed(2)})` : ''}
+                      </Text>
+                    ))}
+                    <Button
+                      compact
+                      mode="text"
+                      icon="plus"
+                      textColor="#2196F3"
+                      onPress={() =>
+                        setOpcaoGrupoId(opcaoGrupoId === grupo.id ? null : grupo.id)
+                      }
+                    >
+                      Adicionar opção
+                    </Button>
+                    {opcaoGrupoId === grupo.id && (
+                      <View>
+                        <TextInput
+                          label="Buscar item do estoque"
+                          value={opcaoBusca}
+                          onChangeText={setOpcaoBusca}
+                          mode="outlined"
+                          dense
+                          style={styles.input}
+                          theme={{ colors: { background: '#2a2a2a' } }}
+                        />
+                        <View style={styles.pickerLista}>
+                          {opcoesEstoqueFiltradas.slice(0, 15).map((e) => (
+                            <Button
+                              key={e.id}
+                              mode="text"
+                              textColor="#fff"
+                              style={styles.pickerItem}
+                              contentStyle={{ justifyContent: 'flex-start' }}
+                              onPress={() => adicionarOpcaoComponente(grupo.id, e)}
+                            >
+                              {e.name}
+                            </Button>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+                  </Card.Content>
+                </Card>
+              ))
+            )}
 
-              <TextInput
-                label="Preço de Venda *"
-                value={value}
-                onChangeText={setValue}
-                mode="outlined"
-                keyboardType="decimal-pad"
-                style={styles.input}
-                theme={{ colors: { background: '#2a2a2a' } }}
-              />
+            <Divider style={styles.divider} />
+            <Text style={styles.subTitulo}>Novo componente</Text>
+            <TextInput
+              label="Nome do componente"
+              value={novaCompNome}
+              onChangeText={setNovaCompNome}
+              mode="outlined"
+              style={styles.input}
+              theme={{ colors: { background: '#2a2a2a' } }}
+            />
+            <Chip
+              selected={novaCompObrigatorio}
+              onPress={() => setNovaCompObrigatorio(!novaCompObrigatorio)}
+              style={{ marginBottom: 12, alignSelf: 'flex-start' }}
+            >
+              Obrigatório
+            </Chip>
+            <Button
+              mode="contained-tonal"
+              icon="plus"
+              onPress={adicionarGrupoComponente}
+              loading={savingComp}
+              disabled={savingComp}
+              style={{ marginBottom: 12 }}
+            >
+              Adicionar componente
+            </Button>
 
-              <View style={styles.modalButtons}>
-                <Button
-                  mode="outlined"
-                  onPress={() => setModalDetalhes(false)}
-                  style={styles.modalButton}
-                  textColor="#fff"
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  mode="outlined"
-                  onPress={() => excluirProduto(produtoSelecionado.id)}
-                  style={[styles.modalButton, styles.deleteButton]}
-                  textColor="#FF5722"
-                >
-                  Excluir
-                </Button>
-                <Button
-                  mode="contained"
-                  onPress={atualizarProduto}
-                  loading={loading}
-                  disabled={loading}
-                  style={styles.modalButton}
-                >
-                  Salvar
-                </Button>
-              </View>
-            </ScrollView>
-          )}
+            <Button
+              mode="outlined"
+              onPress={() => setCompVisible(false)}
+              textColor="#fff"
+            >
+              Fechar
+            </Button>
+          </ScrollView>
         </Modal>
       </Portal>
     </View>
@@ -561,5 +880,105 @@ const styles = StyleSheet.create({
   },
   deleteButton: {
     borderColor: '#FF5722',
+  },
+  faltaCard: {
+    marginBottom: 16,
+    backgroundColor: '#2a1414',
+    borderColor: '#FF5722',
+    borderWidth: 1,
+  },
+  faltaHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  faltaTitulo: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FF7043',
+  },
+  faltaBadge: {
+    backgroundColor: '#FF5722',
+  },
+  faltaItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#3a2020',
+  },
+  faltaItemNome: {
+    color: '#fff',
+    flex: 1,
+  },
+  faltaItemQtd: {
+    color: '#FF9800',
+    fontWeight: 'bold',
+  },
+  idealTexto: {
+    color: '#aaa',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  divider: {
+    marginVertical: 10,
+    backgroundColor: '#333',
+  },
+  acoesRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    flexWrap: 'wrap',
+  },
+  selecionadoCard: {
+    backgroundColor: '#14261a',
+    marginBottom: 12,
+  },
+  selecionadoContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  selecionadoNome: {
+    color: '#fff',
+    fontWeight: 'bold',
+    flex: 1,
+  },
+  pickerLista: {
+    marginBottom: 12,
+    maxHeight: 220,
+  },
+  pickerItem: {
+    alignItems: 'flex-start',
+  },
+  dica: {
+    color: '#aaa',
+    fontSize: 12,
+    marginBottom: 12,
+  },
+  subTitulo: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  grupoCard: {
+    backgroundColor: '#222',
+    marginBottom: 10,
+  },
+  grupoHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  grupoNome: {
+    color: '#fff',
+    fontWeight: 'bold',
+    flex: 1,
+  },
+  opcaoTexto: {
+    color: '#ccc',
+    fontSize: 13,
+    marginVertical: 2,
   },
 });
