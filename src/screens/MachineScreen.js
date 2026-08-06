@@ -20,6 +20,7 @@ import {
   IconButton,
 } from 'react-native-paper';
 import api from '../services/api';
+import { formatarValor } from '../utils/format';
 
 export default function MachineScreen({ navigation }) {
   const [maquinas, setMaquinas] = useState([]);
@@ -155,7 +156,7 @@ export default function MachineScreen({ navigation }) {
                   <View style={styles.statItem}>
                     <Text style={styles.statLabel}>Rendimento</Text>
                     <Text style={styles.statValor}>
-                      R$ {calcularRendimento(maquina).toFixed(2)}
+                      R$ {formatarValor(calcularRendimento(maquina))}
                     </Text>
                   </View>
                 </View>
@@ -262,7 +263,7 @@ export default function MachineScreen({ navigation }) {
               <View style={styles.detalheItem}>
                 <Text style={styles.detalheLabel}>Rendimento:</Text>
                 <Text style={styles.detalheValor}>
-                  R$ {calcularRendimento(maquinaSelecionada).toFixed(2)}
+                  R$ {formatarValor(calcularRendimento(maquinaSelecionada))}
                 </Text>
               </View>
 

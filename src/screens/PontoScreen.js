@@ -18,6 +18,7 @@ import {
   Chip,
 } from 'react-native-paper';
 import api from '../services/api';
+import { formatarValor } from '../utils/format';
 
 export default function PontoScreen({ navigation }) {
   const [funcionarios, setFuncionarios] = useState([]);
@@ -723,8 +724,8 @@ export default function PontoScreen({ navigation }) {
               </Text>
               <View style={styles.metaInfo}>
                 <Text style={styles.metaText}>Meta: {metaAtualSemana.metaHoras}h</Text>
-                <Text style={styles.metaText}>Bônus: R$ {metaAtualSemana.bonificacao.toFixed(2)}</Text>
-                <Text style={styles.metaText}>Valor/h: R$ {metaAtualSemana.valorHora.toFixed(2)}</Text>
+                <Text style={styles.metaText}>Bônus: R$ {formatarValor(metaAtualSemana.bonificacao)}</Text>
+                <Text style={styles.metaText}>Valor/h: R$ {formatarValor(metaAtualSemana.valorHora)}</Text>
               </View>
               {metaAtualSemana.isDefault && <Text style={styles.metaBadge}>(Padrão)</Text>}
               <Button
@@ -810,11 +811,11 @@ export default function PontoScreen({ navigation }) {
                   <View style={styles.infoRow}>
                     <Text style={styles.infoText}>Horas: {func.workedHours}</Text>
                     <Text style={styles.infoText}>
-                      Valor: R$ {calcularValorDiario(
+                      Valor: R$ {formatarValor(calcularValorDiario(
                         valoresTemp[func.id]?.entry || func.entry,
                         valoresTemp[func.id]?.exit || func.exit,
                         func.valorHora
-                      ).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ))}
                     </Text>
                   </View>
 
@@ -879,7 +880,7 @@ export default function PontoScreen({ navigation }) {
                           </View>
                           <View style={styles.infoRow}>
                             <Text style={styles.infoText}>Horas: {workedHours}</Text>
-                            <Text style={styles.infoText}>Valor: R$ {valorDia.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</Text>
+                            <Text style={styles.infoText}>Valor: R$ {formatarValor(valorDia)}</Text>
                           </View>
                         </Card.Content>
                       </Card>
@@ -890,12 +891,12 @@ export default function PontoScreen({ navigation }) {
                     <Card.Content>
                       <Text style={styles.resumoLabel}>Resumo horas:</Text>
                       <Text style={styles.resumoHoras}>{Math.floor(totalHorasSemana)}h {Math.round((totalHorasSemana % 1) * 60)}m</Text>
-                      <Text style={styles.resumoValor}>R$ {totalValorSemana.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</Text>
+                      <Text style={styles.resumoValor}>R$ {formatarValor(totalValorSemana)}</Text>
                       {temBonificacao && (
-                        <Text style={styles.bonusValor}>+ R$ {bonificacaoGanha.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} 🏆</Text>
+                        <Text style={styles.bonusValor}>+ R$ {formatarValor(bonificacaoGanha)} 🏆</Text>
                       )}
                       {descontoVale > 0 && (
-                        <Text style={styles.descontoValor}>- R$ {descontoVale.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} 💵</Text>
+                        <Text style={styles.descontoValor}>- R$ {formatarValor(descontoVale)} 💵</Text>
                       )}
                       {descontoVale > 0 && (
                         <>
@@ -915,12 +916,12 @@ export default function PontoScreen({ navigation }) {
                       {(temBonificacao || descontoVale > 0) ? (
                         <>
                           <View style={styles.divisor} />
-                          <Text style={styles.resumoTotal}>= R$ {valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</Text>
+                          <Text style={styles.resumoTotal}>= R$ {formatarValor(valorTotal)}</Text>
                         </>
                       ) : (
                         <>
                           <View style={styles.divisor} />
-                          <Text style={styles.resumoTotal}>Total: R$ {totalValorSemana.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</Text>
+                          <Text style={styles.resumoTotal}>Total: R$ {formatarValor(totalValorSemana)}</Text>
                         </>
                       )}
                     </Card.Content>
@@ -1011,7 +1012,7 @@ export default function PontoScreen({ navigation }) {
                           </View>
                           <View style={styles.infoRow}>
                             <Text style={styles.infoText}>Horas: {workedHours}</Text>
-                            <Text style={styles.infoText}>Valor: R$ {valorDia.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</Text>
+                            <Text style={styles.infoText}>Valor: R$ {formatarValor(valorDia)}</Text>
                           </View>
                         </Card.Content>
                       </Card>
@@ -1022,12 +1023,12 @@ export default function PontoScreen({ navigation }) {
                     <Card.Content>
                       <Text style={styles.resumoLabel}>Resumo do Mês:</Text>
                       <Text style={styles.resumoHoras}>{Math.floor(totalHorasMes)}h {Math.round((totalHorasMes % 1) * 60)}m</Text>
-                      <Text style={styles.resumoValor}>R$ {valorBaseTotalMes.toFixed(2)}</Text>
+                      <Text style={styles.resumoValor}>R$ {formatarValor(valorBaseTotalMes)}</Text>
                       {bonificacaoTotalMes > 0 && (
-                        <Text style={styles.bonusValor}>+ R$ {bonificacaoTotalMes.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} 🏆 ({quantidadeBonificacoes}x)</Text>
+                        <Text style={styles.bonusValor}>+ R$ {formatarValor(bonificacaoTotalMes)} 🏆 ({quantidadeBonificacoes}x)</Text>
                       )}
                       {descontoValeMesTotal > 0 && (
-                        <Text style={styles.descontoValor}>- R$ {descontoValeMesTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} 💵</Text>
+                        <Text style={styles.descontoValor}>- R$ {formatarValor(descontoValeMesTotal)} 💵</Text>
                       )}
                       {descontoValeMesTotal > 0 && (
                         <>
@@ -1047,12 +1048,12 @@ export default function PontoScreen({ navigation }) {
                       {(bonificacaoTotalMes > 0 || descontoValeMesTotal > 0) ? (
                         <>
                           <View style={styles.divisor} />
-                          <Text style={styles.resumoTotal}>= R$ {valorTotalMes.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</Text>
+                          <Text style={styles.resumoTotal}>= R$ {formatarValor(valorTotalMes)}</Text>
                         </>
                       ) : (
                         <>
                           <View style={styles.divisor} />
-                          <Text style={styles.resumoTotal}>Total: R$ {valorBaseTotalMes.toFixed(2)}</Text>
+                          <Text style={styles.resumoTotal}>Total: R$ {formatarValor(valorBaseTotalMes)}</Text>
                         </>
                       )}
                     </Card.Content>
@@ -1213,20 +1214,20 @@ export default function PontoScreen({ navigation }) {
                 <View style={styles.gastoResumoLinha}>
                   <Text style={styles.gastoResumoLabel}>Produtos (vale):</Text>
                   <Text style={styles.gastoResumoValor}>
-                    R$ {Number(gastosModalData?.totalProdutos || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    R$ {formatarValor(gastosModalData?.totalProdutos || 0)}
                   </Text>
                 </View>
                 <View style={styles.gastoResumoLinha}>
                   <Text style={styles.gastoResumoLabel}>Vales em dinheiro:</Text>
                   <Text style={styles.gastoResumoValor}>
-                    R$ {Number(gastosModalData?.totalVales || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    R$ {formatarValor(gastosModalData?.totalVales || 0)}
                   </Text>
                 </View>
                 <View style={styles.divisor} />
                 <View style={styles.gastoResumoLinha}>
                   <Text style={styles.gastoResumoTotalLabel}>Total a descontar:</Text>
                   <Text style={styles.gastoResumoTotalValor}>
-                    R$ {Number(gastosModalData?.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    R$ {formatarValor(gastosModalData?.total || 0)}
                   </Text>
                 </View>
               </View>
@@ -1248,7 +1249,7 @@ export default function PontoScreen({ navigation }) {
                         </Text>
                       </View>
                       <Text style={styles.gastoItemValor}>
-                        R$ {Number(item.valorTotal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        R$ {formatarValor(item.valorTotal || 0)}
                       </Text>
                     </View>
                   ))

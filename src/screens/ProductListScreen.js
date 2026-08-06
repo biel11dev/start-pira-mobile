@@ -18,6 +18,7 @@ import {
   Chip,
 } from 'react-native-paper';
 import api from '../services/api';
+import { formatarValor } from '../utils/format';
 
 export default function ProductListScreen({ navigation }) {
   const [produtos, setProdutos] = useState([]);
@@ -196,7 +197,7 @@ export default function ProductListScreen({ navigation }) {
                     </View>
                     <View style={styles.produtoPrecoContainer}>
                       <Text style={styles.produtoPreco}>
-                        R$ {produto.value?.toFixed(2)}
+                        R$ {formatarValor(produto.value)}
                       </Text>
                     </View>
                   </View>
@@ -312,14 +313,14 @@ export default function ProductListScreen({ navigation }) {
               <View style={styles.detalheItem}>
                 <Text style={styles.detalheLabel}>Preço Venda:</Text>
                 <Text style={styles.detalheValor}>
-                  R$ {produtoSelecionado.value?.toFixed(2)}
+                  R$ {formatarValor(produtoSelecionado.value)}
                 </Text>
               </View>
 
               <View style={styles.detalheItem}>
                 <Text style={styles.detalheLabel}>Preço Custo:</Text>
                 <Text style={styles.detalheValor}>
-                  R$ {produtoSelecionado.valuecusto?.toFixed(2)}
+                  R$ {formatarValor(produtoSelecionado.valuecusto)}
                 </Text>
               </View>
 

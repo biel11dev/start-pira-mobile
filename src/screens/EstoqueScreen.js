@@ -23,6 +23,7 @@ import {
   SegmentedButtons,
 } from 'react-native-paper';
 import api from '../services/api';
+import { formatarValor } from '../utils/format';
 
 export default function EstoqueScreen({ navigation }) {
   const [estoque, setEstoque] = useState([]);
@@ -669,7 +670,7 @@ export default function EstoqueScreen({ navigation }) {
                     {(grupo.opcoes || []).map((op) => (
                       <Text key={op.id} style={styles.opcaoTexto}>
                         • {op.nome}
-                        {op.valorExtra ? ` (+R$ ${Number(op.valorExtra).toFixed(2)})` : ''}
+                        {op.valorExtra ? ` (+R$ ${formatarValor(op.valorExtra)})` : ''}
                       </Text>
                     ))}
                     <Button

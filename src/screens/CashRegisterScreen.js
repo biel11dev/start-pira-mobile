@@ -17,6 +17,7 @@ import {
 } from 'react-native-paper';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { formatarValor } from '../utils/format';
 
 export default function CashRegisterScreen({ navigation }) {
   const [registros, setRegistros] = useState([]);
@@ -220,7 +221,7 @@ export default function CashRegisterScreen({ navigation }) {
       if (Math.abs(soma - valor) > 0.01) {
         Alert.alert(
           'Atenção',
-          `A soma dos destinos (R$ ${soma.toFixed(2)}) deve ser igual ao valor total (R$ ${valor.toFixed(2)})`
+          `A soma dos destinos (R$ ${formatarValor(soma)}) deve ser igual ao valor total (R$ ${formatarValor(valor)})`
         );
         return;
       }
@@ -654,7 +655,7 @@ export default function CashRegisterScreen({ navigation }) {
                         <View style={styles.registroHeader}>
                           <Text style={styles.registroData}>{formatarData(registro.date)}</Text>
                           <Text style={styles.registroTotal}>
-                            R$ {registro.balance?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '0,00'}
+                            R$ {formatarValor(registro.balance || 0)}
                           </Text>
                         </View>
                         
@@ -746,7 +747,7 @@ export default function CashRegisterScreen({ navigation }) {
                   </Button>
                 </View>
                 <Text style={styles.maquinaTotal}>
-                  Valor Total Máquina Semana: R$ {(valorMaquinaSemana[semanaAtual - 1] || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  Valor Total Máquina Semana: R$ {formatarValor(valorMaquinaSemana[semanaAtual - 1] || 0)}
                 </Text>
               </Card.Content>
             </Card>
@@ -756,7 +757,7 @@ export default function CashRegisterScreen({ navigation }) {
               <Card.Content>
                 <Text style={styles.lucroLabel}>Lucro Total da Semana:</Text>
                 <Text style={styles.lucroValor}>
-                  R$ {calcularLucroTotal().toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  R$ {formatarValor(calcularLucroTotal())}
                 </Text>
               </Card.Content>
             </Card>
@@ -782,7 +783,7 @@ export default function CashRegisterScreen({ navigation }) {
                             <Text style={styles.registroMensalData}>
                               {formatarData(registro.date)}:
                               <Text style={styles.registroMensalValor}>
-                                R$ {((registro.cartao || 0) + (registro.dinheiro || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                R$ {formatarValor((registro.cartao || 0) + (registro.dinheiro || 0))}
                               </Text>
                             </Text>
                             <View style={styles.registroMensalDetalhes}>
@@ -805,7 +806,7 @@ export default function CashRegisterScreen({ navigation }) {
                 {totalValorMaquinaMes > 0 && (
                   <View style={styles.valorMaquinaContainer}>
                     <Text style={styles.valorMaquinaLabel}>Valor Total Máquina Mês:</Text>
-                    <Text style={styles.valorMaquinaValor}>R$ {totalValorMaquinaMes.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</Text>
+                    <Text style={styles.valorMaquinaValor}>R$ {formatarValor(totalValorMaquinaMes)}</Text>
                   </View>
                 )}
               </Card.Content>
@@ -816,7 +817,7 @@ export default function CashRegisterScreen({ navigation }) {
               <Card.Content>
                 <Text style={styles.lucroLabel}>Lucro Total do Mês:</Text>
                 <Text style={styles.lucroValor}>
-                  R$ {totalLucroMes.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  R$ {formatarValor(totalLucroMes)}
                 </Text>
               </Card.Content>
             </Card>

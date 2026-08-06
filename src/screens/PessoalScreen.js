@@ -291,10 +291,11 @@ export default function PessoalScreen({ navigation }) {
   };
 
   const formatarValor = (valor) => {
-    return valor.toLocaleString('pt-BR', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+    const n = Number(valor);
+    const safe = Number.isFinite(n) ? n : 0;
+    const [inteiro, decimal] = Math.abs(safe).toFixed(2).split('.');
+    const inteiroFmt = inteiro.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return `${safe < 0 ? '-' : ''}${inteiroFmt},${decimal}`;
   };
 
   const totais = calcularTotais();

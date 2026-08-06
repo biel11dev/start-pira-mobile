@@ -5,7 +5,10 @@ import {
   ScrollView,
   Alert,
   Image,
+  Linking,
 } from 'react-native';
+import { Picker } from '@react-native-picker/picker';
+import * as ImagePicker from 'expo-image-picker';
 import {
   Appbar,
   Card,
@@ -22,6 +25,7 @@ import {
 } from 'react-native-paper';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { formatarValor } from '../utils/format';
 
 // Formas de pagamento padrão (usadas se a API não retornar nenhuma)
 const FORMAS_PADRAO = [
@@ -31,6 +35,56 @@ const FORMAS_PADRAO = [
   { id: 'f-vale', nome: 'Vale', valor: 'vale' },
   { id: 'f-fiado', nome: 'Fiado', valor: 'pendente' },
 ];
+
+// Seletor de origens reutilizável (ADD / Vale / Prêmio).
+// Cada linha: nome da origem (Picker) + valor. Permite adicionar/remover linhas.
+function OrigemRows({ origens, setOrigens, origensDisponiveis }) {
+  const add = () => setOrigens([...origens, { nome: '', valor: '' }]);
+  const remove = (i) => {
+    if (origens.length <= 1) return;
+    setOrigens(origens.filter((_, idx) => idx !== i));
+  };
+  const change = (i, field, val) => {
+    const u = origens.map((o, idx) => (idx === i ? { ...o, [field]: val } : o));
+    setOrigens(u);
+  };
+  return (
+    <View>
+      {origens.map((o, i) => (
+        <View key={i} style={styles.origemRow}>
+          <View style={styles.origemPickerWrap}>
+            <Picker
+              selectedValue={o.nome}
+              onValueChange={(v) => change(i, 'nome', v)}
+              dropdownIconColor="#fff"
+              style={styles.origemPicker}
+            >
+              <Picker.Item label="Origem..." value="" color="#999" />
+              {(origensDisponiveis || []).map((od) => (
+                <Picker.Item key={od.id || od.nome} label={od.nome} value={od.nome} />
+              ))}
+            </Picker>
+          </View>
+          <TextInput
+            mode="outlined"
+            dense
+            keyboardType="numeric"
+            placeholder="0,00"
+            value={o.valor}
+            onChangeText={(v) => change(i, 'valor', v)}
+            style={styles.origemValorInput}
+          />
+          {origens.length > 1 && (
+            <IconButton icon="close" size={18} iconColor="#ff6b6b" onPress={() => remove(i)} />
+          )}
+        </View>
+      ))}
+      <Button mode="text" icon="plus" onPress={add} textColor="#2196F3" compact>
+        Adicionar origem
+      </Button>
+    </View>
+  );
+}
 
 
 export default function PDVScreen({ navigation }) {
@@ -81,6 +135,66 @@ export default function PDVScreen({ navigation }) {
   const [saqueFormaId, setSaqueFormaId] = useState(null);
   const [taxaSaque, setTaxaSaque] = useState(30);
   const [savingSaque, setSavingSaque] = useState(false);
+
+  // Origens (compartilhado por ADD / Vale / Prêmio / Config)
+  const [origensDisponiveis, setOrigensDisponiveis] = useState([]);
+  const [origemSaldos, setOrigemSaldos] = useState([]);
+
+  // ADD (adicionar dinheiro ao caixa)
+  const [addValorTotal, setAddValorTotal] = useState('');
+  const [addOrigens, setAddOrigens] = useState([{ nome: '', valor: '' }]);
+  const [addObs, setAddObs] = useState('');
+  const [savingAdd, setSavingAdd] = useState(false);
+
+  // Vale (retirada do caixa)
+  const [valeValorTotal, setValeValorTotal] = useState('');
+  const [valeOrigens, setValeOrigens] = useState([{ nome: '', valor: '' }]);
+  const [valeObs, setValeObs] = useState('');
+  const [savingVale, setSavingVale] = useState(false);
+
+  // Prêmio (registro de prêmio com comprovantes)
+  const [premioStep, setPremioStep] = useState(1);
+  const [premioImagem1, setPremioImagem1] = useState(null);
+  const [premioImagem2, setPremioImagem2] = useState(null);
+  const [premioValor, setPremioValor] = useState('');
+  const [premioOrigens, setPremioOrigens] = useState([{ nome: '', valor: '' }]);
+  const [premioObs, setPremioObs] = useState('');
+  const [savingPremio, setSavingPremio] = useState(false);
+
+  // Config. Venda
+  const [configTab, setConfigTab] = useState('cupons'); // cupons | taxas | limites | formas | saque | origens
+  const [cupons, setCupons] = useState([]);
+  const [novoCupom, setNovoCupom] = useState({ codigo: '', tipo: 'PERCENTUAL', valor: '', validoAte: '', limiteUso: '' });
+  const [taxas, setTaxas] = useState([]);
+  const [novaTaxa, setNovaTaxa] = useState({ nome: '', tipo: 'PERCENTUAL', valor: '' });
+  const [configLimites, setConfigLimites] = useState([]);
+  const [limiteEdits, setLimiteEdits] = useState({});
+  const [formasConfig, setFormasConfig] = useState([]);
+  const [novaFormaNome, setNovaFormaNome] = useState('');
+  const [taxaSaqueInput, setTaxaSaqueInput] = useState('');
+  const [savingTaxaSaque, setSavingTaxaSaque] = useState(false);
+  const [novaOrigemNome, setNovaOrigemNome] = useState('');
+  // Origem: movimentação manual
+  const [origemMovNome, setOrigemMovNome] = useState('');
+  const [origemMovTipo, setOrigemMovTipo] = useState('ENTRADA');
+  const [origemMovValor, setOrigemMovValor] = useState('');
+  const [origemMovDesc, setOrigemMovDesc] = useState('');
+  // Origem: transferência
+  const [transfFrom, setTransfFrom] = useState('');
+  const [transfTo, setTransfTo] = useState('');
+  const [transfValor, setTransfValor] = useState('');
+  const [transfDesc, setTransfDesc] = useState('');
+
+  // Pedidos
+  const [pedidosTab, setPedidosTab] = useState('historico'); // historico | online
+  const [ultimosPedidos, setUltimosPedidos] = useState([]);
+  const [pedidosDataInicio, setPedidosDataInicio] = useState('');
+  const [pedidosDataFim, setPedidosDataFim] = useState('');
+  const [loadingPedidos, setLoadingPedidos] = useState(false);
+  const [pedidosOnline, setPedidosOnline] = useState([]);
+  const [onlineStatusFiltro, setOnlineStatusFiltro] = useState('');
+  const [loadingOnline, setLoadingOnline] = useState(false);
+  const [atualizandoStatusId, setAtualizandoStatusId] = useState(null);
 
   useEffect(() => {
     carregarProdutos();
@@ -148,6 +262,455 @@ export default function PDVScreen({ navigation }) {
       Alert.alert('Erro', 'Não foi possível carregar as comandas');
     } finally {
       setLoadingComandas(false);
+    }
+  };
+
+  // ---- Origens (compartilhado) ----
+  const carregarOrigens = async () => {
+    try {
+      const res = await api.get('/api/pdv-origens');
+      setOrigensDisponiveis(res.data || []);
+    } catch (error) {
+      console.log('Erro ao carregar origens');
+    }
+  };
+
+  const carregarOrigemSaldos = async () => {
+    try {
+      let res = await api.get('/api/pdv-origem-saldo');
+      if ((res.data || []).length === 0) {
+        await api.post('/api/pdv-origem-saldo/init');
+        res = await api.get('/api/pdv-origem-saldo');
+      }
+      setOrigemSaldos(res.data || []);
+    } catch (error) {
+      console.log('Erro ao carregar saldos de origem');
+    }
+  };
+
+  const somaOrigens = (arr) =>
+    (arr || []).reduce((s, o) => s + (parseFloat(o.valor) || 0), 0);
+
+  // ---- ADD (adicionar dinheiro ao caixa) ----
+  const confirmarAdd = async () => {
+    const valorTotal = parseFloat(addValorTotal);
+    if (!valorTotal || valorTotal <= 0) {
+      Alert.alert('Atenção', 'Informe o valor total');
+      return;
+    }
+    const preenchidas = addOrigens.filter((o) => o.nome && parseFloat(o.valor) > 0);
+    if (preenchidas.length === 0) {
+      Alert.alert('Atenção', 'Informe pelo menos uma origem');
+      return;
+    }
+    if (Math.abs(somaOrigens(preenchidas) - valorTotal) > 0.01) {
+      Alert.alert(
+        'Atenção',
+        `A soma das origens (R$ ${formatarValor(somaOrigens(preenchidas))}) deve ser igual ao total (R$ ${formatarValor(valorTotal)})`
+      );
+      return;
+    }
+    setSavingAdd(true);
+    try {
+      await api.post('/api/pdv-caixa-movimento', {
+        tipo: 'ADD',
+        valor: valorTotal,
+        origens: preenchidas.map((o) => ({ nome: o.nome, valor: parseFloat(o.valor) })),
+        observacao: addObs || null,
+      });
+      Alert.alert('Sucesso', 'Valor adicionado ao caixa!');
+      setAddValorTotal('');
+      setAddOrigens([{ nome: '', valor: '' }]);
+      setAddObs('');
+      carregarOrigemSaldos();
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao adicionar valor');
+    } finally {
+      setSavingAdd(false);
+    }
+  };
+
+  // ---- Vale (retirada do caixa) ----
+  const confirmarVale = async () => {
+    const valorTotal = parseFloat(valeValorTotal);
+    if (!valorTotal || valorTotal <= 0) {
+      Alert.alert('Atenção', 'Informe o valor do vale');
+      return;
+    }
+    const preenchidas = valeOrigens.filter((o) => o.nome && parseFloat(o.valor) > 0);
+    if (preenchidas.length > 0 && Math.abs(somaOrigens(preenchidas) - valorTotal) > 0.01) {
+      Alert.alert(
+        'Atenção',
+        `A soma dos destinos (R$ ${formatarValor(somaOrigens(preenchidas))}) deve ser igual ao valor total (R$ ${formatarValor(valorTotal)})`
+      );
+      return;
+    }
+    setSavingVale(true);
+    try {
+      const res = await api.post('/api/pdv-caixa-vale', {
+        valor: valorTotal,
+        origens: preenchidas.map((o) => ({ nome: o.nome, valor: parseFloat(o.valor) })),
+        observacao: valeObs || null,
+      });
+      let msg = 'Vale registrado!';
+      if (res.data?.isAdmin && res.data?.despesaPessoal) msg += ' Despesa criada no módulo Pessoal.';
+      if (res.data?.isFuncionario && res.data?.gastoBar) msg += ' Lançado em Gastos Bar (descontado no Ponto).';
+      Alert.alert('Sucesso', msg);
+      setValeValorTotal('');
+      setValeOrigens([{ nome: '', valor: '' }]);
+      setValeObs('');
+      carregarOrigemSaldos();
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao registrar vale');
+    } finally {
+      setSavingVale(false);
+    }
+  };
+
+  // ---- Prêmio ----
+  const escolherImagemPremio = async (setImage) => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permissão', 'Permita o acesso às fotos para anexar o comprovante.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.6,
+        base64: true,
+      });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      if (!asset?.base64) {
+        Alert.alert('Erro', 'Não foi possível ler a imagem');
+        return;
+      }
+      setImage(`data:image/jpeg;base64,${asset.base64}`);
+    } catch (error) {
+      Alert.alert('Erro', 'Falha ao selecionar imagem');
+    }
+  };
+
+  const premioAvancar = (toStep) => {
+    if (toStep === 2 && !premioImagem1) {
+      Alert.alert('Atenção', 'Anexe a imagem de comprovação do ganho');
+      return;
+    }
+    if (toStep === 3) {
+      if (!premioImagem2) {
+        Alert.alert('Atenção', 'Anexe a imagem de comprovação da baixa');
+        return;
+      }
+      const v = parseFloat(premioValor);
+      if (!v || v <= 0) {
+        Alert.alert('Atenção', 'Informe o valor do prêmio');
+        return;
+      }
+      const preenchidas = premioOrigens.filter((o) => o.nome && parseFloat(o.valor) > 0);
+      if (preenchidas.length > 0 && Math.abs(somaOrigens(preenchidas) - v) > 0.01) {
+        Alert.alert('Atenção', 'A soma das origens deve ser igual ao valor do prêmio');
+        return;
+      }
+    }
+    setPremioStep(toStep);
+  };
+
+  const confirmarPremio = async () => {
+    setSavingPremio(true);
+    try {
+      const preenchidas = premioOrigens.filter((o) => o.nome && parseFloat(o.valor) > 0);
+      await api.post('/api/pdv-premio', {
+        imagem1: premioImagem1,
+        imagem2: premioImagem2,
+        valor: parseFloat(premioValor),
+        origens: preenchidas.map((o) => ({ nome: o.nome, valor: parseFloat(o.valor) })),
+        observacao: premioObs || null,
+      });
+      Alert.alert('Sucesso', 'Prêmio registrado!');
+      setPremioStep(1);
+      setPremioImagem1(null);
+      setPremioImagem2(null);
+      setPremioValor('');
+      setPremioOrigens([{ nome: '', valor: '' }]);
+      setPremioObs('');
+      carregarOrigemSaldos();
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao registrar prêmio');
+    } finally {
+      setSavingPremio(false);
+    }
+  };
+
+  // ---- Config. Venda ----
+  const carregarCupons = async () => {
+    try {
+      const r = await api.get('/api/pdv-cupons');
+      setCupons(r.data || []);
+    } catch (e) { /* silencioso */ }
+  };
+  const carregarTaxas = async () => {
+    try {
+      const r = await api.get('/api/pdv-taxas');
+      setTaxas(r.data || []);
+    } catch (e) { /* silencioso */ }
+  };
+  const carregarConfigLimites = async () => {
+    try {
+      let r = await api.get('/api/pdv-config');
+      if ((r.data || []).length === 0) {
+        await api.post('/api/pdv-config/init');
+        r = await api.get('/api/pdv-config');
+      }
+      setConfigLimites(r.data || []);
+    } catch (e) { /* silencioso */ }
+  };
+  const carregarFormasConfig = async () => {
+    try {
+      const r = await api.get('/api/pdv-formas-pagamento');
+      setFormasConfig(r.data || []);
+    } catch (e) { /* silencioso */ }
+  };
+
+  const criarCupom = async () => {
+    if (!novoCupom.codigo || !novoCupom.valor) {
+      Alert.alert('Atenção', 'Código e valor são obrigatórios');
+      return;
+    }
+    try {
+      await api.post('/api/pdv-cupons', {
+        ...novoCupom,
+        valor: parseFloat(novoCupom.valor),
+        limiteUso: novoCupom.limiteUso ? parseInt(novoCupom.limiteUso, 10) : null,
+        validoAte: novoCupom.validoAte || null,
+      });
+      setNovoCupom({ codigo: '', tipo: 'PERCENTUAL', valor: '', validoAte: '', limiteUso: '' });
+      carregarCupons();
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao criar cupom');
+    }
+  };
+  const toggleCupom = async (id, ativo) => {
+    try { await api.put(`/api/pdv-cupons/${id}`, { ativo: !ativo }); carregarCupons(); } catch (e) {}
+  };
+  const excluirCupom = async (id) => {
+    try { await api.delete(`/api/pdv-cupons/${id}`); carregarCupons(); } catch (e) {}
+  };
+
+  const criarTaxa = async () => {
+    if (!novaTaxa.nome || !novaTaxa.valor) {
+      Alert.alert('Atenção', 'Nome e valor são obrigatórios');
+      return;
+    }
+    try {
+      await api.post('/api/pdv-taxas', { ...novaTaxa, valor: parseFloat(novaTaxa.valor) });
+      setNovaTaxa({ nome: '', tipo: 'PERCENTUAL', valor: '' });
+      carregarTaxas();
+    } catch (error) {
+      Alert.alert('Erro', 'Erro ao criar taxa');
+    }
+  };
+  const toggleTaxa = async (id, ativo) => {
+    try { await api.put(`/api/pdv-taxas/${id}`, { ativo: !ativo }); carregarTaxas(); } catch (e) {}
+  };
+  const excluirTaxa = async (id) => {
+    try { await api.delete(`/api/pdv-taxas/${id}`); carregarTaxas(); } catch (e) {}
+  };
+
+  const salvarLimite = async (chave, valor, descricao) => {
+    try {
+      await api.put(`/api/pdv-config/${chave}`, { valor, descricao });
+      carregarConfigLimites();
+      Alert.alert('Sucesso', 'Configuração salva');
+    } catch (e) {
+      Alert.alert('Erro', 'Erro ao salvar configuração');
+    }
+  };
+
+  const criarFormaConfig = async () => {
+    if (!novaFormaNome.trim()) return;
+    try {
+      await api.post('/api/pdv-formas-pagamento', { nome: novaFormaNome.trim() });
+      setNovaFormaNome('');
+      carregarFormasConfig();
+      carregarFormasPagamento();
+    } catch (e) {
+      Alert.alert('Erro', 'Erro ao criar forma de pagamento');
+    }
+  };
+  const toggleFormaConfig = async (id, ativo) => {
+    try {
+      await api.put(`/api/pdv-formas-pagamento/${id}`, { ativo: !ativo });
+      carregarFormasConfig();
+      carregarFormasPagamento();
+    } catch (e) {}
+  };
+  const excluirFormaConfig = async (id) => {
+    try {
+      await api.delete(`/api/pdv-formas-pagamento/${id}`);
+      carregarFormasConfig();
+      carregarFormasPagamento();
+    } catch (e) {}
+  };
+
+  const salvarTaxaSaque = async () => {
+    const taxa = parseFloat(taxaSaqueInput);
+    if (isNaN(taxa) || taxa < 0 || taxa > 100) {
+      Alert.alert('Atenção', 'Taxa inválida. Informe um valor entre 0 e 100.');
+      return;
+    }
+    setSavingTaxaSaque(true);
+    try {
+      const r = await api.put('/api/pdv-saque/config', { taxa });
+      setTaxaSaque(r.data?.taxa ?? taxa);
+      setTaxaSaqueInput('');
+      Alert.alert('Sucesso', `Taxa atualizada para ${r.data?.taxa ?? taxa}%`);
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao salvar taxa');
+    } finally {
+      setSavingTaxaSaque(false);
+    }
+  };
+
+  const criarOrigem = async () => {
+    if (!novaOrigemNome.trim()) return;
+    try {
+      await api.post('/api/pdv-origens', { nome: novaOrigemNome.trim() });
+      setNovaOrigemNome('');
+      carregarOrigens();
+      carregarOrigemSaldos();
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao criar origem');
+    }
+  };
+  const excluirOrigem = async (id) => {
+    try {
+      await api.delete(`/api/pdv-origens/${id}`);
+      carregarOrigens();
+      carregarOrigemSaldos();
+    } catch (e) {
+      Alert.alert('Erro', 'Erro ao excluir origem');
+    }
+  };
+
+  const origemMovimentar = async () => {
+    if (!origemMovNome) {
+      Alert.alert('Atenção', 'Selecione a origem');
+      return;
+    }
+    const v = parseFloat(origemMovValor);
+    if (!v || v <= 0) {
+      Alert.alert('Atenção', 'Informe um valor válido');
+      return;
+    }
+    try {
+      await api.post(`/api/pdv-origem-saldo/${encodeURIComponent(origemMovNome)}/movimentar`, {
+        tipo: origemMovTipo,
+        valor: v,
+        descricao: origemMovDesc,
+      });
+      await carregarOrigemSaldos();
+      setOrigemMovValor('');
+      setOrigemMovDesc('');
+      Alert.alert('Sucesso', 'Movimentação registrada');
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao movimentar origem');
+    }
+  };
+
+  const origemTransferir = async () => {
+    if (!transfFrom || !transfTo) {
+      Alert.alert('Atenção', 'Selecione origem e destino');
+      return;
+    }
+    if (transfFrom === transfTo) {
+      Alert.alert('Atenção', 'Origem e destino devem ser diferentes');
+      return;
+    }
+    const v = parseFloat(transfValor);
+    if (!v || v <= 0) {
+      Alert.alert('Atenção', 'Informe um valor válido');
+      return;
+    }
+    try {
+      await api.post('/api/pdv-origem-saldo/transferir', {
+        origem: transfFrom,
+        destino: transfTo,
+        valor: v,
+        descricao: transfDesc,
+      });
+      await carregarOrigemSaldos();
+      setTransfValor('');
+      setTransfDesc('');
+      Alert.alert('Sucesso', 'Transferência realizada');
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao transferir');
+    }
+  };
+
+  // ---- Pedidos ----
+  const PEDIDO_STATUS = ['pending', 'preparing', 'ready', 'delivered'];
+  const PEDIDO_STATUS_LABELS = {
+    pending: 'Pendente',
+    preparing: 'Em preparo',
+    ready: 'Pronto para retirada',
+    delivered: 'Entregue',
+    cancelled: 'Cancelado',
+  };
+  const proximoStatus = (status) => {
+    const idx = PEDIDO_STATUS.indexOf(status);
+    if (idx === -1 || idx >= PEDIDO_STATUS.length - 1) return null;
+    return PEDIDO_STATUS[idx + 1];
+  };
+
+  const carregarUltimosPedidos = async () => {
+    setLoadingPedidos(true);
+    try {
+      const params = {};
+      if (pedidosDataInicio) params.dataInicio = pedidosDataInicio;
+      if (pedidosDataFim) params.dataFim = pedidosDataFim;
+      const r = await api.get('/api/sales', { params });
+      setUltimosPedidos(r.data || []);
+    } catch (e) {
+      Alert.alert('Erro', 'Erro ao carregar pedidos');
+    } finally {
+      setLoadingPedidos(false);
+    }
+  };
+
+  const carregarPedidosOnline = async (statusArg) => {
+    const status = statusArg !== undefined ? statusArg : onlineStatusFiltro;
+    setLoadingOnline(true);
+    try {
+      const params = {};
+      if (status) params.status = status;
+      const r = await api.get('/api/sales/online', { params });
+      setPedidosOnline(r.data || []);
+    } catch (e) {
+      Alert.alert('Erro', 'Erro ao carregar pedidos online');
+    } finally {
+      setLoadingOnline(false);
+    }
+  };
+
+  const atualizarStatusOnline = async (pedidoId, novoStatus) => {
+    setAtualizandoStatusId(pedidoId);
+    try {
+      const r = await api.put(`/api/sales/${pedidoId}/status`, { status: novoStatus });
+      setPedidosOnline((prev) =>
+        prev.map((p) => (p.id === pedidoId ? { ...p, statusPedido: novoStatus } : p))
+      );
+      const wpp = r.data?.whatsapp;
+      if (wpp?.link) {
+        Linking.openURL(wpp.link).catch(() => {});
+      } else if (wpp && wpp.hasPhone === false) {
+        Alert.alert('Status atualizado', `"${PEDIDO_STATUS_LABELS[novoStatus]}". Cliente sem telefone para WhatsApp.`);
+      }
+      if (onlineStatusFiltro && onlineStatusFiltro !== novoStatus) carregarPedidosOnline();
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao atualizar status');
+    } finally {
+      setAtualizandoStatusId(null);
     }
   };
 
@@ -597,7 +1160,12 @@ export default function PDVScreen({ navigation }) {
       </Appbar.Header>
 
       {/* Abas de sub-módulos (ações) */}
-      <View style={styles.subTabBar}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.subTabBar}
+        contentContainerStyle={styles.subTabBarContent}
+      >
         <Chip
           selected={subTab === 'venda'}
           onPress={() => setSubTab('venda')}
@@ -606,6 +1174,47 @@ export default function PDVScreen({ navigation }) {
         >
           Venda
         </Chip>
+        {isAdmin && (
+          <Chip
+            selected={subTab === 'add'}
+            onPress={() => {
+              setSubTab('add');
+              carregarOrigens();
+              carregarOrigemSaldos();
+            }}
+            style={styles.subTabChip}
+            icon="plus-box"
+          >
+            ADD
+          </Chip>
+        )}
+        {isAdmin && (
+          <Chip
+            selected={subTab === 'vale'}
+            onPress={() => {
+              setSubTab('vale');
+              carregarOrigens();
+              carregarOrigemSaldos();
+            }}
+            style={styles.subTabChip}
+            icon="cash-minus"
+          >
+            Vale
+          </Chip>
+        )}
+        {isAdmin && (
+          <Chip
+            selected={subTab === 'premio'}
+            onPress={() => {
+              setSubTab('premio');
+              carregarOrigens();
+            }}
+            style={styles.subTabChip}
+            icon="trophy"
+          >
+            Prêmio
+          </Chip>
+        )}
         <Chip
           selected={subTab === 'comandas'}
           onPress={() => {
@@ -625,6 +1234,31 @@ export default function PDVScreen({ navigation }) {
         >
           Saque
         </Chip>
+        <Chip
+          selected={subTab === 'pedidos'}
+          onPress={() => {
+            setSubTab('pedidos');
+            if (pedidosTab === 'online') carregarPedidosOnline();
+            else carregarUltimosPedidos();
+          }}
+          style={styles.subTabChip}
+          icon="history"
+        >
+          Pedidos
+        </Chip>
+        {isAdmin && (
+          <Chip
+            selected={subTab === 'config'}
+            onPress={() => {
+              setSubTab('config');
+              carregarCupons();
+            }}
+            style={styles.subTabChip}
+            icon="cog"
+          >
+            Config. Venda
+          </Chip>
+        )}
         {isAdmin && (
           <Chip
             onPress={() => navigation.navigate('CashRegister')}
@@ -634,7 +1268,7 @@ export default function PDVScreen({ navigation }) {
             Caixa
           </Chip>
         )}
-      </View>
+      </ScrollView>
 
       {subTab === 'venda' && (
       <View style={styles.content}>
@@ -659,7 +1293,7 @@ export default function PDVScreen({ navigation }) {
                         {produto.unit} · estoque: {produto.quantity}
                       </Text>
                       <Text style={styles.produtoPreco}>
-                        R$ {Number(produto.value || 0).toFixed(2)}
+                        R$ {formatarValor(produto.value || 0)}
                       </Text>
                     </View>
                     <IconButton
@@ -690,7 +1324,7 @@ export default function PDVScreen({ navigation }) {
                           {item.name} ({item.unit})
                         </Text>
                         <Text style={styles.carrinhoItemPreco}>
-                          R$ {(item.value * item.quantidade).toFixed(2)}
+                          R$ {formatarValor(item.value * item.quantidade)}
                         </Text>
                       </View>
                       <View style={styles.carrinhoItemControls}>
@@ -716,7 +1350,7 @@ export default function PDVScreen({ navigation }) {
           <Card style={styles.totalCard}>
             <Card.Content>
               <Text style={styles.totalLabel}>Total:</Text>
-              <Text style={styles.totalValor}>R$ {subtotal.toFixed(2)}</Text>
+              <Text style={styles.totalValor}>R$ {formatarValor(subtotal)}</Text>
             </Card.Content>
           </Card>
 
@@ -758,7 +1392,7 @@ export default function PDVScreen({ navigation }) {
                       {comanda.clienteNome || comanda.customerName || `Comanda #${comanda.id}`}
                     </Text>
                     <Text style={styles.comandaInfo}>
-                      {(comanda.items || []).length} item(ns) · Total: R$ {totalComanda.toFixed(2)}
+                      {(comanda.items || []).length} item(ns) · Total: R$ {formatarValor(totalComanda)}
                     </Text>
                     <Button
                       mode="contained"
@@ -793,7 +1427,7 @@ export default function PDVScreen({ navigation }) {
               <Text style={styles.saqueInfo}>Taxa: {taxaSaque}%</Text>
               {parseFloat(saqueValor) > 0 && (
                 <Text style={styles.saqueInfo}>
-                  Cobrar na máquina: R$ {saqueCobrarMaquina.toFixed(2)} (taxa R$ {saqueTaxaValor.toFixed(2)})
+                  Cobrar na máquina: R$ {formatarValor(saqueCobrarMaquina)} (taxa R$ {formatarValor(saqueTaxaValor)})
                 </Text>
               )}
 
@@ -835,6 +1469,826 @@ export default function PDVScreen({ navigation }) {
         </ScrollView>
       )}
 
+      {/* Sub-módulo: ADD (adicionar ao caixa) */}
+      {subTab === 'add' && (
+        <ScrollView style={styles.subModuloContainer}>
+          <Text style={styles.subModuloTitulo}>Adicionar dinheiro ao caixa</Text>
+          {origemSaldos.length > 0 && (
+            <View style={styles.saldosRow}>
+              {origemSaldos.map((s) => (
+                <View key={s.id || s.nome} style={styles.saldoChip}>
+                  <Text style={styles.saldoNome}>{s.nome}</Text>
+                  <Text style={styles.saldoValor}>R$ {formatarValor(s.saldo ?? s.valor ?? 0)}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+          <Card style={styles.saqueCard}>
+            <Card.Content>
+              <TextInput
+                label="Valor total (R$)"
+                mode="outlined"
+                keyboardType="numeric"
+                value={addValorTotal}
+                onChangeText={setAddValorTotal}
+                style={styles.saqueInput}
+              />
+              <Text style={styles.secaoLabel}>Origens</Text>
+              <OrigemRows origens={addOrigens} setOrigens={setAddOrigens} origensDisponiveis={origensDisponiveis} />
+              <Text
+                style={[
+                  styles.saqueInfo,
+                  Math.abs(somaOrigens(addOrigens) - (parseFloat(addValorTotal) || 0)) < 0.01
+                    ? styles.somaOk
+                    : styles.somaErro,
+                ]}
+              >
+                Soma das origens: R$ {formatarValor(somaOrigens(addOrigens))}
+              </Text>
+              <TextInput
+                label="Observação (opcional)"
+                mode="outlined"
+                value={addObs}
+                onChangeText={setAddObs}
+                style={styles.saqueInput}
+              />
+              <Button
+                mode="contained"
+                icon="plus-box"
+                onPress={confirmarAdd}
+                loading={savingAdd}
+                disabled={savingAdd}
+                style={styles.saqueButton}
+              >
+                Adicionar ao caixa
+              </Button>
+            </Card.Content>
+          </Card>
+        </ScrollView>
+      )}
+
+      {/* Sub-módulo: Vale (retirada do caixa) */}
+      {subTab === 'vale' && (
+        <ScrollView style={styles.subModuloContainer}>
+          <Text style={styles.subModuloTitulo}>Vale / Retirada do caixa</Text>
+          {origemSaldos.length > 0 && (
+            <View style={styles.saldosRow}>
+              {origemSaldos.map((s) => (
+                <View key={s.id || s.nome} style={styles.saldoChip}>
+                  <Text style={styles.saldoNome}>{s.nome}</Text>
+                  <Text style={styles.saldoValor}>R$ {formatarValor(s.saldo ?? s.valor ?? 0)}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+          <Card style={styles.saqueCard}>
+            <Card.Content>
+              <TextInput
+                label="Valor do vale (R$)"
+                mode="outlined"
+                keyboardType="numeric"
+                value={valeValorTotal}
+                onChangeText={setValeValorTotal}
+                style={styles.saqueInput}
+              />
+              <Text style={styles.secaoLabel}>Origens (de onde sai o dinheiro)</Text>
+              <OrigemRows origens={valeOrigens} setOrigens={setValeOrigens} origensDisponiveis={origensDisponiveis} />
+              <Text style={styles.saqueInfo}>
+                Soma dos destinos: R$ {formatarValor(somaOrigens(valeOrigens))}
+              </Text>
+              <TextInput
+                label="Observação (opcional)"
+                mode="outlined"
+                value={valeObs}
+                onChangeText={setValeObs}
+                style={styles.saqueInput}
+              />
+              <Button
+                mode="contained"
+                icon="cash-minus"
+                onPress={confirmarVale}
+                loading={savingVale}
+                disabled={savingVale}
+                style={[styles.saqueButton, { backgroundColor: '#e53935' }]}
+              >
+                Registrar vale
+              </Button>
+            </Card.Content>
+          </Card>
+        </ScrollView>
+      )}
+
+      {/* Sub-módulo: Prêmio */}
+      {subTab === 'premio' && (
+        <ScrollView style={styles.subModuloContainer}>
+          <Text style={styles.subModuloTitulo}>Registrar prêmio</Text>
+          <Text style={styles.stepIndicator}>Etapa {premioStep} de 3</Text>
+          <Card style={styles.saqueCard}>
+            <Card.Content>
+              {premioStep === 1 && (
+                <>
+                  <Text style={styles.saqueInfo}>
+                    Anexe a foto que comprova o ganho do cliente na máquina.
+                  </Text>
+                  {premioImagem1 ? (
+                    <View>
+                      <Image source={{ uri: premioImagem1 }} style={styles.premioPreview} resizeMode="contain" />
+                      <Button mode="text" textColor="#ff6b6b" onPress={() => setPremioImagem1(null)}>
+                        Remover imagem
+                      </Button>
+                    </View>
+                  ) : (
+                    <Button
+                      mode="outlined"
+                      icon="camera"
+                      onPress={() => escolherImagemPremio(setPremioImagem1)}
+                      textColor="#2196F3"
+                      style={{ marginTop: 8 }}
+                    >
+                      Anexar comprovante do ganho
+                    </Button>
+                  )}
+                  <Button
+                    mode="contained"
+                    onPress={() => premioAvancar(2)}
+                    disabled={!premioImagem1}
+                    style={styles.saqueButton}
+                  >
+                    Avançar
+                  </Button>
+                </>
+              )}
+
+              {premioStep === 2 && (
+                <>
+                  <Text style={styles.saqueInfo}>
+                    Anexe a foto da baixa do valor no jogo, informe o valor e a(s) origem(ns).
+                  </Text>
+                  {premioImagem2 ? (
+                    <View>
+                      <Image source={{ uri: premioImagem2 }} style={styles.premioPreview} resizeMode="contain" />
+                      <Button mode="text" textColor="#ff6b6b" onPress={() => setPremioImagem2(null)}>
+                        Remover imagem
+                      </Button>
+                    </View>
+                  ) : (
+                    <Button
+                      mode="outlined"
+                      icon="camera"
+                      onPress={() => escolherImagemPremio(setPremioImagem2)}
+                      textColor="#2196F3"
+                      style={{ marginVertical: 8 }}
+                    >
+                      Anexar comprovante da baixa
+                    </Button>
+                  )}
+                  <TextInput
+                    label="Valor do prêmio (R$)"
+                    mode="outlined"
+                    keyboardType="numeric"
+                    value={premioValor}
+                    onChangeText={setPremioValor}
+                    style={styles.saqueInput}
+                  />
+                  <Text style={styles.secaoLabel}>Origens</Text>
+                  <OrigemRows origens={premioOrigens} setOrigens={setPremioOrigens} origensDisponiveis={origensDisponiveis} />
+                  <Text style={styles.saqueInfo}>
+                    Soma das origens: R$ {formatarValor(somaOrigens(premioOrigens))}
+                  </Text>
+                  <TextInput
+                    label="Observação (opcional)"
+                    mode="outlined"
+                    value={premioObs}
+                    onChangeText={setPremioObs}
+                    style={styles.saqueInput}
+                  />
+                  <View style={styles.premioBotoes}>
+                    <Button mode="outlined" onPress={() => setPremioStep(1)} textColor="#fff">
+                      Voltar
+                    </Button>
+                    <Button mode="contained" onPress={() => premioAvancar(3)} style={styles.confirmarButton}>
+                      Avançar
+                    </Button>
+                  </View>
+                </>
+              )}
+
+              {premioStep === 3 && (
+                <>
+                  <Text style={styles.saqueInfo}>Revise as informações antes de confirmar:</Text>
+                  <View style={styles.premioConfirmImgs}>
+                    {premioImagem1 && <Image source={{ uri: premioImagem1 }} style={styles.premioThumb} />}
+                    {premioImagem2 && <Image source={{ uri: premioImagem2 }} style={styles.premioThumb} />}
+                  </View>
+                  <Text style={styles.resumoTexto}>Valor: R$ {formatarValor(parseFloat(premioValor) || 0)}</Text>
+                  {somaOrigens(premioOrigens) > 0 && (
+                    <Text style={styles.resumoTexto}>
+                      Origens: R$ {formatarValor(somaOrigens(premioOrigens))}
+                    </Text>
+                  )}
+                  {premioObs ? <Text style={styles.resumoTexto}>Obs: {premioObs}</Text> : null}
+                  <View style={styles.premioBotoes}>
+                    <Button mode="outlined" onPress={() => setPremioStep(2)} textColor="#fff">
+                      Voltar
+                    </Button>
+                    <Button
+                      mode="contained"
+                      onPress={confirmarPremio}
+                      loading={savingPremio}
+                      disabled={savingPremio}
+                      style={styles.confirmarButton}
+                    >
+                      Confirmar prêmio
+                    </Button>
+                  </View>
+                </>
+              )}
+            </Card.Content>
+          </Card>
+        </ScrollView>
+      )}
+
+      {/* Sub-módulo: Pedidos */}
+      {subTab === 'pedidos' && (
+        <ScrollView style={styles.subModuloContainer}>
+          <View style={styles.configSubtabs}>
+            <Chip
+              selected={pedidosTab === 'historico'}
+              onPress={() => {
+                setPedidosTab('historico');
+                carregarUltimosPedidos();
+              }}
+              style={styles.subTabChip}
+            >
+              Histórico
+            </Chip>
+            <Chip
+              selected={pedidosTab === 'online'}
+              onPress={() => {
+                setPedidosTab('online');
+                carregarPedidosOnline();
+              }}
+              style={styles.subTabChip}
+            >
+              Online
+            </Chip>
+          </View>
+
+          {pedidosTab === 'historico' && (
+            <>
+              <View style={styles.dataFiltroRow}>
+                <TextInput
+                  label="Início (AAAA-MM-DD)"
+                  mode="outlined"
+                  dense
+                  value={pedidosDataInicio}
+                  onChangeText={setPedidosDataInicio}
+                  style={styles.dataInput}
+                />
+                <TextInput
+                  label="Fim (AAAA-MM-DD)"
+                  mode="outlined"
+                  dense
+                  value={pedidosDataFim}
+                  onChangeText={setPedidosDataFim}
+                  style={styles.dataInput}
+                />
+              </View>
+              <Button mode="contained" icon="magnify" onPress={carregarUltimosPedidos} style={{ marginBottom: 12 }}>
+                Buscar
+              </Button>
+              {loadingPedidos ? (
+                <ActivityIndicator color="#2196F3" style={{ marginTop: 16 }} />
+              ) : ultimosPedidos.length === 0 ? (
+                <Text style={styles.subModuloVazio}>Nenhum pedido no período.</Text>
+              ) : (
+                ultimosPedidos.map((p) => (
+                  <Card key={p.id} style={styles.comandaCard}>
+                    <Card.Content>
+                      <Text style={styles.comandaCliente}>
+                        {p.customerName || 'Cliente'} — R$ {formatarValor(p.total || 0)}
+                      </Text>
+                      <Text style={styles.comandaInfo}>
+                        {p.paymentMethod || ''} · {p.date ? new Date(p.date).toLocaleString('pt-BR') : ''}
+                      </Text>
+                      {(p.items || []).map((it, idx) => (
+                        <Text key={idx} style={styles.pedidoItem}>
+                          {it.quantity}x {it.name}
+                        </Text>
+                      ))}
+                    </Card.Content>
+                  </Card>
+                ))
+              )}
+            </>
+          )}
+
+          {pedidosTab === 'online' && (
+            <>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.configSubtabs}>
+                <Chip
+                  selected={onlineStatusFiltro === ''}
+                  onPress={() => {
+                    setOnlineStatusFiltro('');
+                    carregarPedidosOnline('');
+                  }}
+                  style={styles.subTabChip}
+                >
+                  Todos
+                </Chip>
+                {Object.keys(PEDIDO_STATUS_LABELS).map((st) => (
+                  <Chip
+                    key={st}
+                    selected={onlineStatusFiltro === st}
+                    onPress={() => {
+                      setOnlineStatusFiltro(st);
+                      carregarPedidosOnline(st);
+                    }}
+                    style={styles.subTabChip}
+                  >
+                    {PEDIDO_STATUS_LABELS[st]}
+                  </Chip>
+                ))}
+              </ScrollView>
+              {loadingOnline ? (
+                <ActivityIndicator color="#2196F3" style={{ marginTop: 16 }} />
+              ) : pedidosOnline.length === 0 ? (
+                <Text style={styles.subModuloVazio}>Nenhum pedido online.</Text>
+              ) : (
+                pedidosOnline.map((p) => {
+                  const prox = proximoStatus(p.statusPedido);
+                  return (
+                    <Card key={p.id} style={styles.comandaCard}>
+                      <Card.Content>
+                        <Text style={styles.comandaCliente}>
+                          #{p.id} — {p.customerName || 'Cliente'}
+                        </Text>
+                        <Text style={styles.comandaInfo}>
+                          R$ {formatarValor(p.total || 0)} · {PEDIDO_STATUS_LABELS[p.statusPedido] || p.statusPedido}
+                        </Text>
+                        {(p.items || []).map((it, idx) => (
+                          <Text key={idx} style={styles.pedidoItem}>
+                            {it.quantity}x {it.name}
+                          </Text>
+                        ))}
+                        <View style={styles.pedidoAcoes}>
+                          {prox && (
+                            <Button
+                              mode="contained"
+                              compact
+                              loading={atualizandoStatusId === p.id}
+                              disabled={atualizandoStatusId === p.id}
+                              onPress={() => atualizarStatusOnline(p.id, prox)}
+                              style={styles.confirmarButton}
+                            >
+                              {PEDIDO_STATUS_LABELS[prox]}
+                            </Button>
+                          )}
+                          {p.statusPedido !== 'cancelled' && p.statusPedido !== 'delivered' && (
+                            <Button
+                              mode="outlined"
+                              compact
+                              textColor="#ff6b6b"
+                              onPress={() => atualizarStatusOnline(p.id, 'cancelled')}
+                            >
+                              Cancelar
+                            </Button>
+                          )}
+                        </View>
+                      </Card.Content>
+                    </Card>
+                  );
+                })
+              )}
+            </>
+          )}
+        </ScrollView>
+      )}
+
+      {/* Sub-módulo: Config. Venda */}
+      {subTab === 'config' && (
+        <ScrollView style={styles.subModuloContainer}>
+          <Text style={styles.subModuloTitulo}>Configurações de Venda</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.configSubtabs}>
+            {[
+              ['cupons', 'Cupons'],
+              ['taxas', 'Taxas'],
+              ['limites', 'Limites'],
+              ['formas', 'Formas Pgto'],
+              ['saque', 'Saque'],
+              ['origens', 'Origens'],
+            ].map(([k, label]) => (
+              <Chip
+                key={k}
+                selected={configTab === k}
+                onPress={() => {
+                  setConfigTab(k);
+                  if (k === 'cupons') carregarCupons();
+                  if (k === 'taxas') carregarTaxas();
+                  if (k === 'limites') carregarConfigLimites();
+                  if (k === 'formas') carregarFormasConfig();
+                  if (k === 'origens') {
+                    carregarOrigens();
+                    carregarOrigemSaldos();
+                  }
+                }}
+                style={styles.subTabChip}
+              >
+                {label}
+              </Chip>
+            ))}
+          </ScrollView>
+
+          {configTab === 'cupons' && (
+            <Card style={styles.saqueCard}>
+              <Card.Content>
+                <TextInput
+                  label="Código"
+                  mode="outlined"
+                  dense
+                  value={novoCupom.codigo}
+                  onChangeText={(v) => setNovoCupom({ ...novoCupom, codigo: v })}
+                  style={styles.saqueInput}
+                />
+                <View style={styles.tipoRow}>
+                  <Chip
+                    selected={novoCupom.tipo === 'PERCENTUAL'}
+                    onPress={() => setNovoCupom({ ...novoCupom, tipo: 'PERCENTUAL' })}
+                    style={styles.chip}
+                  >
+                    %
+                  </Chip>
+                  <Chip
+                    selected={novoCupom.tipo === 'FIXO'}
+                    onPress={() => setNovoCupom({ ...novoCupom, tipo: 'FIXO' })}
+                    style={styles.chip}
+                  >
+                    R$
+                  </Chip>
+                  <TextInput
+                    label="Valor"
+                    mode="outlined"
+                    dense
+                    keyboardType="numeric"
+                    value={novoCupom.valor}
+                    onChangeText={(v) => setNovoCupom({ ...novoCupom, valor: v })}
+                    style={styles.flexInput}
+                  />
+                </View>
+                <View style={styles.tipoRow}>
+                  <TextInput
+                    label="Válido até (AAAA-MM-DD)"
+                    mode="outlined"
+                    dense
+                    value={novoCupom.validoAte}
+                    onChangeText={(v) => setNovoCupom({ ...novoCupom, validoAte: v })}
+                    style={styles.flexInput}
+                  />
+                  <TextInput
+                    label="Limite"
+                    mode="outlined"
+                    dense
+                    keyboardType="numeric"
+                    value={novoCupom.limiteUso}
+                    onChangeText={(v) => setNovoCupom({ ...novoCupom, limiteUso: v })}
+                    style={styles.smallInput}
+                  />
+                </View>
+                <Button mode="contained" icon="plus" onPress={criarCupom} style={styles.saqueButton}>
+                  Criar cupom
+                </Button>
+                <Divider style={styles.divider} />
+                {cupons.length === 0 ? (
+                  <Text style={styles.subModuloVazio}>Nenhum cupom cadastrado.</Text>
+                ) : (
+                  cupons.map((c) => (
+                    <View key={c.id} style={styles.configItemRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.configItemNome}>
+                          {c.codigo} {c.ativo ? '' : '(inativo)'}
+                        </Text>
+                        <Text style={styles.configItemSub}>
+                          {c.tipo === 'PERCENTUAL' ? `${c.valor}%` : `R$ ${formatarValor(c.valor)}`}
+                        </Text>
+                      </View>
+                      <IconButton
+                        icon={c.ativo ? 'toggle-switch' : 'toggle-switch-off'}
+                        iconColor={c.ativo ? '#4caf50' : '#999'}
+                        onPress={() => toggleCupom(c.id, c.ativo)}
+                      />
+                      <IconButton icon="delete" iconColor="#ff6b6b" onPress={() => excluirCupom(c.id)} />
+                    </View>
+                  ))
+                )}
+              </Card.Content>
+            </Card>
+          )}
+
+          {configTab === 'taxas' && (
+            <Card style={styles.saqueCard}>
+              <Card.Content>
+                <TextInput
+                  label="Nome da taxa"
+                  mode="outlined"
+                  dense
+                  value={novaTaxa.nome}
+                  onChangeText={(v) => setNovaTaxa({ ...novaTaxa, nome: v })}
+                  style={styles.saqueInput}
+                />
+                <View style={styles.tipoRow}>
+                  <Chip
+                    selected={novaTaxa.tipo === 'PERCENTUAL'}
+                    onPress={() => setNovaTaxa({ ...novaTaxa, tipo: 'PERCENTUAL' })}
+                    style={styles.chip}
+                  >
+                    %
+                  </Chip>
+                  <Chip
+                    selected={novaTaxa.tipo === 'FIXO'}
+                    onPress={() => setNovaTaxa({ ...novaTaxa, tipo: 'FIXO' })}
+                    style={styles.chip}
+                  >
+                    R$
+                  </Chip>
+                  <TextInput
+                    label="Valor"
+                    mode="outlined"
+                    dense
+                    keyboardType="numeric"
+                    value={novaTaxa.valor}
+                    onChangeText={(v) => setNovaTaxa({ ...novaTaxa, valor: v })}
+                    style={styles.flexInput}
+                  />
+                </View>
+                <Button mode="contained" icon="plus" onPress={criarTaxa} style={styles.saqueButton}>
+                  Criar taxa
+                </Button>
+                <Divider style={styles.divider} />
+                {taxas.length === 0 ? (
+                  <Text style={styles.subModuloVazio}>Nenhuma taxa cadastrada.</Text>
+                ) : (
+                  taxas.map((t) => (
+                    <View key={t.id} style={styles.configItemRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.configItemNome}>
+                          {t.nome} {t.ativo ? '' : '(inativa)'}
+                        </Text>
+                        <Text style={styles.configItemSub}>
+                          {t.tipo === 'PERCENTUAL' ? `${t.valor}%` : `R$ ${formatarValor(t.valor)}`}
+                        </Text>
+                      </View>
+                      <IconButton
+                        icon={t.ativo ? 'toggle-switch' : 'toggle-switch-off'}
+                        iconColor={t.ativo ? '#4caf50' : '#999'}
+                        onPress={() => toggleTaxa(t.id, t.ativo)}
+                      />
+                      <IconButton icon="delete" iconColor="#ff6b6b" onPress={() => excluirTaxa(t.id)} />
+                    </View>
+                  ))
+                )}
+              </Card.Content>
+            </Card>
+          )}
+
+          {configTab === 'limites' && (
+            <Card style={styles.saqueCard}>
+              <Card.Content>
+                {configLimites.length === 0 ? (
+                  <Text style={styles.subModuloVazio}>Nenhuma configuração.</Text>
+                ) : (
+                  configLimites.map((cfg) => (
+                    <View key={cfg.chave} style={styles.limiteRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.configItemNome}>{cfg.descricao || cfg.chave}</Text>
+                        <TextInput
+                          mode="outlined"
+                          dense
+                          keyboardType="numeric"
+                          value={limiteEdits[cfg.chave] ?? String(cfg.valor ?? '')}
+                          onChangeText={(v) => setLimiteEdits({ ...limiteEdits, [cfg.chave]: v })}
+                          style={styles.saqueInput}
+                        />
+                      </View>
+                      <IconButton
+                        icon="content-save"
+                        iconColor="#4caf50"
+                        onPress={() =>
+                          salvarLimite(cfg.chave, limiteEdits[cfg.chave] ?? String(cfg.valor ?? ''), cfg.descricao)
+                        }
+                      />
+                    </View>
+                  ))
+                )}
+              </Card.Content>
+            </Card>
+          )}
+
+          {configTab === 'formas' && (
+            <Card style={styles.saqueCard}>
+              <Card.Content>
+                <View style={styles.tipoRow}>
+                  <TextInput
+                    label="Nova forma de pagamento"
+                    mode="outlined"
+                    dense
+                    value={novaFormaNome}
+                    onChangeText={setNovaFormaNome}
+                    style={styles.flexInput}
+                  />
+                  <IconButton icon="plus" iconColor="#4caf50" onPress={criarFormaConfig} />
+                </View>
+                <Divider style={styles.divider} />
+                {formasConfig.length === 0 ? (
+                  <Text style={styles.subModuloVazio}>Nenhuma forma cadastrada.</Text>
+                ) : (
+                  formasConfig.map((f) => (
+                    <View key={f.id} style={styles.configItemRow}>
+                      <Text style={[styles.configItemNome, { flex: 1 }]}>
+                        {f.nome} {f.ativo === false ? '(inativa)' : ''}
+                      </Text>
+                      <IconButton
+                        icon={f.ativo === false ? 'toggle-switch-off' : 'toggle-switch'}
+                        iconColor={f.ativo === false ? '#999' : '#4caf50'}
+                        onPress={() => toggleFormaConfig(f.id, f.ativo)}
+                      />
+                      <IconButton icon="delete" iconColor="#ff6b6b" onPress={() => excluirFormaConfig(f.id)} />
+                    </View>
+                  ))
+                )}
+              </Card.Content>
+            </Card>
+          )}
+
+          {configTab === 'saque' && (
+            <Card style={styles.saqueCard}>
+              <Card.Content>
+                <Text style={styles.configItemNome}>Taxa de saque atual: {taxaSaque}%</Text>
+                <Text style={styles.saqueInfo}>
+                  Ex.: cliente quer R$ 40,00 → cobra R$ {formatarValor(40 + 40 * (taxaSaque / 100))} na máquina.
+                </Text>
+                <TextInput
+                  label="Nova taxa (%)"
+                  mode="outlined"
+                  keyboardType="numeric"
+                  value={taxaSaqueInput}
+                  onChangeText={setTaxaSaqueInput}
+                  style={styles.saqueInput}
+                />
+                <Button
+                  mode="contained"
+                  icon="content-save"
+                  onPress={salvarTaxaSaque}
+                  loading={savingTaxaSaque}
+                  disabled={savingTaxaSaque}
+                  style={styles.saqueButton}
+                >
+                  Salvar taxa
+                </Button>
+              </Card.Content>
+            </Card>
+          )}
+
+          {configTab === 'origens' && (
+            <>
+              <View style={styles.saldosRow}>
+                {origemSaldos.map((s) => (
+                  <View key={s.id || s.nome} style={styles.saldoChip}>
+                    <Text style={styles.saldoNome}>{s.nome}</Text>
+                    <Text style={styles.saldoValor}>R$ {formatarValor(s.saldo ?? s.valor ?? 0)}</Text>
+                  </View>
+                ))}
+              </View>
+
+              <Card style={styles.saqueCard}>
+                <Card.Content>
+                  <Text style={styles.secaoLabel}>Gerenciar origens</Text>
+                  <View style={styles.tipoRow}>
+                    <TextInput
+                      label="Nova origem"
+                      mode="outlined"
+                      dense
+                      value={novaOrigemNome}
+                      onChangeText={setNovaOrigemNome}
+                      style={styles.flexInput}
+                    />
+                    <IconButton icon="plus" iconColor="#4caf50" onPress={criarOrigem} />
+                  </View>
+                  {origensDisponiveis.map((o) => (
+                    <View key={o.id || o.nome} style={styles.configItemRow}>
+                      <Text style={[styles.configItemNome, { flex: 1 }]}>{o.nome}</Text>
+                      <IconButton icon="delete" iconColor="#ff6b6b" onPress={() => excluirOrigem(o.id)} />
+                    </View>
+                  ))}
+                </Card.Content>
+              </Card>
+
+              <Card style={styles.saqueCard}>
+                <Card.Content>
+                  <Text style={styles.secaoLabel}>Movimentar origem</Text>
+                  <View style={styles.origemPickerWrap}>
+                    <Picker
+                      selectedValue={origemMovNome}
+                      onValueChange={setOrigemMovNome}
+                      dropdownIconColor="#fff"
+                      style={styles.origemPicker}
+                    >
+                      <Picker.Item label="Selecione a origem..." value="" color="#999" />
+                      {origensDisponiveis.map((o) => (
+                        <Picker.Item key={o.id || o.nome} label={o.nome} value={o.nome} />
+                      ))}
+                    </Picker>
+                  </View>
+                  <View style={styles.tipoRow}>
+                    {['ENTRADA', 'SAIDA', 'AJUSTE'].map((tp) => (
+                      <Chip
+                        key={tp}
+                        selected={origemMovTipo === tp}
+                        onPress={() => setOrigemMovTipo(tp)}
+                        style={styles.chip}
+                      >
+                        {tp}
+                      </Chip>
+                    ))}
+                  </View>
+                  <TextInput
+                    label="Valor (R$)"
+                    mode="outlined"
+                    dense
+                    keyboardType="numeric"
+                    value={origemMovValor}
+                    onChangeText={setOrigemMovValor}
+                    style={styles.saqueInput}
+                  />
+                  <TextInput
+                    label="Descrição (opcional)"
+                    mode="outlined"
+                    dense
+                    value={origemMovDesc}
+                    onChangeText={setOrigemMovDesc}
+                    style={styles.saqueInput}
+                  />
+                  <Button mode="contained" icon="cash-sync" onPress={origemMovimentar} style={styles.saqueButton}>
+                    Registrar movimentação
+                  </Button>
+                </Card.Content>
+              </Card>
+
+              <Card style={styles.saqueCard}>
+                <Card.Content>
+                  <Text style={styles.secaoLabel}>Transferir entre origens</Text>
+                  <View style={styles.origemPickerWrap}>
+                    <Picker
+                      selectedValue={transfFrom}
+                      onValueChange={setTransfFrom}
+                      dropdownIconColor="#fff"
+                      style={styles.origemPicker}
+                    >
+                      <Picker.Item label="Origem..." value="" color="#999" />
+                      {origensDisponiveis.map((o) => (
+                        <Picker.Item key={o.id || o.nome} label={o.nome} value={o.nome} />
+                      ))}
+                    </Picker>
+                  </View>
+                  <View style={styles.origemPickerWrap}>
+                    <Picker
+                      selectedValue={transfTo}
+                      onValueChange={setTransfTo}
+                      dropdownIconColor="#fff"
+                      style={styles.origemPicker}
+                    >
+                      <Picker.Item label="Destino..." value="" color="#999" />
+                      {origensDisponiveis.map((o) => (
+                        <Picker.Item key={o.id || o.nome} label={o.nome} value={o.nome} />
+                      ))}
+                    </Picker>
+                  </View>
+                  <TextInput
+                    label="Valor (R$)"
+                    mode="outlined"
+                    dense
+                    keyboardType="numeric"
+                    value={transfValor}
+                    onChangeText={setTransfValor}
+                    style={styles.saqueInput}
+                  />
+                  <TextInput
+                    label="Descrição (opcional)"
+                    mode="outlined"
+                    dense
+                    value={transfDesc}
+                    onChangeText={setTransfDesc}
+                    style={styles.saqueInput}
+                  />
+                  <Button mode="contained" icon="bank-transfer" onPress={origemTransferir} style={styles.saqueButton}>
+                    Transferir
+                  </Button>
+                </Card.Content>
+              </Card>
+            </>
+          )}
+        </ScrollView>
+      )}
+
       {/* Modal de checkout */}
       <Portal>
         <Modal
@@ -854,7 +2308,7 @@ export default function PDVScreen({ navigation }) {
 
             <View style={styles.resumoLinha}>
               <Text style={styles.resumoTexto}>Subtotal:</Text>
-              <Text style={styles.resumoTexto}>R$ {subtotal.toFixed(2)}</Text>
+              <Text style={styles.resumoTexto}>R$ {formatarValor(subtotal)}</Text>
             </View>
 
             <Text style={styles.secaoLabel}>Desconto</Text>
@@ -887,12 +2341,12 @@ export default function PDVScreen({ navigation }) {
             {desconto > 0 && (
               <View style={styles.resumoLinha}>
                 <Text style={styles.resumoTexto}>Desconto:</Text>
-                <Text style={styles.resumoTexto}>- R$ {desconto.toFixed(2)}</Text>
+                <Text style={styles.resumoTexto}>- R$ {formatarValor(desconto)}</Text>
               </View>
             )}
             <View style={styles.resumoLinha}>
               <Text style={styles.totalModalLabel}>Total:</Text>
-              <Text style={styles.totalModalValor}>R$ {totalFinal.toFixed(2)}</Text>
+              <Text style={styles.totalModalValor}>R$ {formatarValor(totalFinal)}</Text>
             </View>
 
             <Divider style={styles.divider} />
@@ -923,7 +2377,7 @@ export default function PDVScreen({ navigation }) {
                 />
                 {parseFloat(valorRecebido) > 0 && (
                   <Text style={styles.trocoTexto}>
-                    Troco: R$ {Math.max((parseFloat(valorRecebido) || 0) - totalFinal, 0).toFixed(2)}
+                    Troco: R$ {formatarValor(Math.max((parseFloat(valorRecebido) || 0) - totalFinal, 0))}
                   </Text>
                 )}
               </View>
@@ -1044,7 +2498,7 @@ export default function PDVScreen({ navigation }) {
               : 'Aguardando seleção no terminal'}
           </Text>
           <Text style={styles.pointValor}>
-            R$ {Number(pointOrder?.amount || calcularTotalFinal()).toFixed(2)}
+            R$ {formatarValor(pointOrder?.amount || calcularTotalFinal())}
           </Text>
           <View style={styles.pixStatusRow}>
             <ActivityIndicator size="small" color="#ffeb3b" />
@@ -1378,5 +2832,144 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     marginTop: 4,
+  },
+  subTabBarContent: {
+    alignItems: 'center',
+    paddingRight: 8,
+  },
+  origemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  origemPickerWrap: {
+    flex: 1,
+    backgroundColor: '#2a2a2a',
+    borderRadius: 4,
+    marginRight: 6,
+    marginBottom: 6,
+    justifyContent: 'center',
+  },
+  origemPicker: {
+    color: '#fff',
+  },
+  origemValorInput: {
+    width: 100,
+    backgroundColor: '#1a1a1a',
+  },
+  saldosRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 10,
+  },
+  saldoChip: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginRight: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  saldoNome: {
+    color: '#999',
+    fontSize: 11,
+  },
+  saldoValor: {
+    color: '#4caf50',
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  somaOk: {
+    color: '#4caf50',
+  },
+  somaErro: {
+    color: '#ff9800',
+  },
+  stepIndicator: {
+    color: '#2196F3',
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  premioPreview: {
+    width: '100%',
+    height: 180,
+    borderRadius: 8,
+    marginVertical: 8,
+    backgroundColor: '#000',
+  },
+  premioBotoes: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 12,
+  },
+  premioConfirmImgs: {
+    flexDirection: 'row',
+    marginVertical: 8,
+  },
+  premioThumb: {
+    width: 90,
+    height: 90,
+    borderRadius: 6,
+    marginRight: 8,
+    backgroundColor: '#000',
+  },
+  configSubtabs: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  dataFiltroRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  dataInput: {
+    flex: 1,
+    marginRight: 6,
+    backgroundColor: '#1a1a1a',
+  },
+  pedidoItem: {
+    color: '#bbb',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  pedidoAcoes: {
+    flexDirection: 'row',
+    marginTop: 8,
+    gap: 8,
+  },
+  tipoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  flexInput: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
+  },
+  smallInput: {
+    width: 90,
+    marginLeft: 6,
+    backgroundColor: '#1a1a1a',
+  },
+  configItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+    paddingVertical: 2,
+  },
+  configItemNome: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  configItemSub: {
+    color: '#999',
+    fontSize: 12,
+  },
+  limiteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 });

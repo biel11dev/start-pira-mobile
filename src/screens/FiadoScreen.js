@@ -20,6 +20,7 @@ import {
 } from 'react-native-paper';
 import { Picker } from '@react-native-picker/picker';
 import api from '../services/api';
+import { formatarValor } from '../utils/format';
 
 export default function FiadoScreen({ navigation }) {
   const [clientes, setClientes] = useState([]);
@@ -346,7 +347,7 @@ export default function FiadoScreen({ navigation }) {
                       {produtos.map((produto) => (
                         <Picker.Item
                           key={produto.id}
-                          label={`${produto.name} - R$ ${produto.value?.toFixed(2)}`}
+                          label={`${produto.name} - R$ ${formatarValor(produto.value)}`}
                           value={produto.id.toString()}
                         />
                       ))}
@@ -400,7 +401,7 @@ export default function FiadoScreen({ navigation }) {
                                 {compra.product} {compra.quantity}
                               </Text>
                               <Text style={[styles.itemValor, { color: '#F44336' }]}>
-                                -R$ {compra.total?.toFixed(2)}
+                                -R$ {formatarValor(compra.total)}
                               </Text>
                               <Text style={styles.itemData}>{formatarData(compra.date)}</Text>
                             </View>
@@ -456,7 +457,7 @@ export default function FiadoScreen({ navigation }) {
                           <View style={styles.itemRow}>
                             <View style={styles.itemInfo}>
                               <Text style={[styles.itemValor, { color: '#4CAF50' }]}>
-                                R$ {pagamento.amount?.toFixed(2)}
+                                R$ {formatarValor(pagamento.amount)}
                               </Text>
                               <Text style={styles.itemData}>{formatarData(pagamento.date)}</Text>
                             </View>
@@ -477,7 +478,7 @@ export default function FiadoScreen({ navigation }) {
               <Card style={styles.totalCard}>
                 <Card.Content>
                   <Text style={styles.totalLabel}>Valor Devedor:</Text>
-                  <Text style={styles.totalValor}>R$ {calcularValorDevedor().toFixed(2)}</Text>
+                  <Text style={styles.totalValor}>R$ {formatarValor(calcularValorDevedor())}</Text>
                 </Card.Content>
               </Card>
 
