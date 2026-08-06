@@ -38,7 +38,8 @@ export default function AuditoriaScreen({ navigation }) {
   const carregarModulos = async () => {
     try {
       const resp = await api.get('/api/auditoria/modulos');
-      setModulos(resp.data || []);
+      const data = resp.data;
+      setModulos(Array.isArray(data) ? data : (data?.modulos || []));
     } catch (error) {
       console.error('Erro ao carregar módulos:', error);
     }
@@ -47,7 +48,8 @@ export default function AuditoriaScreen({ navigation }) {
   const carregarDispositivos = async () => {
     try {
       const resp = await api.get('/api/auditoria/dispositivos');
-      setDispositivos(resp.data || []);
+      const data = resp.data;
+      setDispositivos(Array.isArray(data) ? data : (data?.dispositivos || []));
     } catch (error) {
       console.error('Erro ao carregar dispositivos:', error);
     }
@@ -129,7 +131,7 @@ export default function AuditoriaScreen({ navigation }) {
                 >
                   Todos
                 </Chip>
-                {modulos.map((m) => (
+                {(Array.isArray(modulos) ? modulos : []).map((m) => (
                   <Chip
                     key={m}
                     selected={filtroModulo === m}
@@ -184,7 +186,7 @@ export default function AuditoriaScreen({ navigation }) {
                 >
                   Todos
                 </Chip>
-                {dispositivos.map((disp) => (
+                {(Array.isArray(dispositivos) ? dispositivos : []).map((disp) => (
                   <Chip
                     key={disp}
                     selected={filtroDispositivo === disp}
