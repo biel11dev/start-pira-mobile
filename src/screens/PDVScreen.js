@@ -22,6 +22,7 @@ import {
   Modal,
   ActivityIndicator,
   RadioButton,
+  Checkbox,
 } from 'react-native-paper';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -90,6 +91,7 @@ function OrigemRows({ origens, setOrigens, origensDisponiveis }) {
 export default function PDVScreen({ navigation }) {
   const { user } = useAuth();
   const [produtos, setProdutos] = useState([]);
+  const [selectedProductUnits, setSelectedProductUnits] = useState({});
   const [carrinho, setCarrinho] = useState([]);
   const [busca, setBusca] = useState('');
   const [loading, setLoading] = useState(false);
@@ -170,6 +172,7 @@ export default function PDVScreen({ navigation }) {
   const [configLimites, setConfigLimites] = useState([]);
   const [limiteEdits, setLimiteEdits] = useState({});
   const [formasConfig, setFormasConfig] = useState([]);
+  const [pointConfig, setPointConfig] = useState(null);
   const [novaFormaNome, setNovaFormaNome] = useState('');
   const [taxaSaqueInput, setTaxaSaqueInput] = useState('');
   const [savingTaxaSaque, setSavingTaxaSaque] = useState(false);
@@ -184,6 +187,29 @@ export default function PDVScreen({ navigation }) {
   const [transfTo, setTransfTo] = useState('');
   const [transfValor, setTransfValor] = useState('');
   const [transfDesc, setTransfDesc] = useState('');
+
+  // Caixa (sub-caixa diário do PDV)
+  const [caixaSubTab, setCaixaSubTab] = useState('atual'); // atual | historico | gastosbar | origens
+  const [caixaAtual, setCaixaAtual] = useState(null);
+  const [caixaHistorico, setCaixaHistorico] = useState([]);
+  const [loadingCaixa, setLoadingCaixa] = useState(false);
+  const [abrirCaixaVisible, setAbrirCaixaVisible] = useState(false);
+  const [fecharCaixaVisible, setFecharCaixaVisible] = useState(false);
+  const [caixaSaldoInicial, setCaixaSaldoInicial] = useState('');
+  const [caixaObsAbrir, setCaixaObsAbrir] = useState('');
+  const [caixaOrigemBAG, setCaixaOrigemBAG] = useState('');
+  const [caixaOrigemMAQUINA, setCaixaOrigemMAQUINA] = useState('');
+  const [caixaObsFechar, setCaixaObsFechar] = useState('');
+  const [savingCaixa, setSavingCaixa] = useState(false);
+  // Gastos Bar
+  const [gastosBarSemanas, setGastosBarSemanas] = useState([]);
+  const [gastosBarResumo, setGastosBarResumo] = useState([]);
+  const [gastosBarView, setGastosBarView] = useState('semanas'); // semanas | funcionarios
+  const [loadingGastosBar, setLoadingGastosBar] = useState(false);
+  // Origem histórico (visão dentro do Caixa)
+  const [origemHistoricoNome, setOrigemHistoricoNome] = useState(null);
+  const [origemHistoricoMovs, setOrigemHistoricoMovs] = useState([]);
+  const [loadingOrigemHistorico, setLoadingOrigemHistorico] = useState(false);
 
   // Pedidos
   const [pedidosTab, setPedidosTab] = useState('historico'); // historico | online
@@ -470,6 +496,20 @@ export default function PDVScreen({ navigation }) {
       const r = await api.get('/api/pdv-formas-pagamento');
       setFormasConfig(r.data || []);
     } catch (e) { /* silencioso */ }
+    try {
+      const c = await api.get('/api/point/config');
+      setPointConfig(c.data || null);
+    } catch (e) { setPointConfig(null); }
+  };
+
+  const togglePointForma = async (id, campo, valor) => {
+    try {
+      await api.put(`/api/pdv-formas-pagamento/${id}`, { [campo]: valor });
+      carregarFormasConfig();
+      carregarFormasPagamento();
+    } catch (e) {
+      Alert.alert('Erro', 'Erro ao atualizar integração da maquininha');
+    }
   };
 
   const criarCupom = async () => {
@@ -646,6 +686,109 @@ export default function PDVScreen({ navigation }) {
     } catch (error) {
       Alert.alert('Erro', error.response?.data?.error || 'Erro ao transferir');
     }
+  };
+
+  // ---- Caixa (sub-caixa diário) ----
+  const carregarCaixaAtual = async () => {
+    try {
+      const res = await api.get('/api/pdv-caixa-controle/atual');
+      setCaixaAtual(res.data || null);
+    } catch (error) {
+      console.log('Erro ao buscar caixa atual');
+    }
+  };
+
+  const carregarCaixaHistorico = async () => {
+    try {
+      const res = await api.get('/api/pdv-caixa-controle/historico');
+      setCaixaHistorico(res.data?.caixas || []);
+    } catch (error) {
+      console.log('Erro ao buscar histórico de caixa');
+    }
+  };
+
+  const abrirCaixa = async () => {
+    setSavingCaixa(true);
+    try {
+      await api.post('/api/pdv-caixa-controle/abrir', {
+        saldoInicial: parseFloat(caixaSaldoInicial) || 0,
+        observacao: caixaObsAbrir || null,
+        origemBAG: caixaOrigemBAG !== '' ? parseFloat(caixaOrigemBAG) : null,
+        origemMAQUINA: caixaOrigemMAQUINA !== '' ? parseFloat(caixaOrigemMAQUINA) : null,
+      });
+      setAbrirCaixaVisible(false);
+      setCaixaSaldoInicial('');
+      setCaixaObsAbrir('');
+      setCaixaOrigemBAG('');
+      setCaixaOrigemMAQUINA('');
+      await carregarCaixaAtual();
+      await carregarOrigemSaldos();
+      Alert.alert('Sucesso', 'Caixa aberto com sucesso!');
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao abrir caixa');
+    } finally {
+      setSavingCaixa(false);
+    }
+  };
+
+  const fecharCaixa = async () => {
+    setSavingCaixa(true);
+    try {
+      await api.put('/api/pdv-caixa-controle/fechar', {
+        observacao: caixaObsFechar || null,
+      });
+      setFecharCaixaVisible(false);
+      setCaixaObsFechar('');
+      await carregarCaixaAtual();
+      Alert.alert('Sucesso', 'Caixa fechado e migrado para o registro mensal!');
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao fechar caixa');
+    } finally {
+      setSavingCaixa(false);
+    }
+  };
+
+  const carregarGastosBar = async () => {
+    setLoadingGastosBar(true);
+    try {
+      const [semanas, resumo] = await Promise.all([
+        api.get('/api/pdv-gastos-bar'),
+        api.get('/api/pdv-gastos-bar/resumo'),
+      ]);
+      setGastosBarSemanas(semanas.data || []);
+      setGastosBarResumo(resumo.data || []);
+    } catch (error) {
+      console.log('Erro ao buscar gastos bar');
+    } finally {
+      setLoadingGastosBar(false);
+    }
+  };
+
+  const carregarOrigemHistorico = async (nome) => {
+    if (origemHistoricoNome === nome) {
+      setOrigemHistoricoNome(null);
+      setOrigemHistoricoMovs([]);
+      return;
+    }
+    setLoadingOrigemHistorico(true);
+    setOrigemHistoricoNome(nome);
+    setOrigemHistoricoMovs([]);
+    try {
+      const res = await api.get(
+        `/api/pdv-origem-saldo/${encodeURIComponent(nome)}/historico?limit=30`
+      );
+      setOrigemHistoricoMovs(res.data?.movimentos || []);
+    } catch (error) {
+      console.log('Erro ao buscar histórico da origem');
+    } finally {
+      setLoadingOrigemHistorico(false);
+    }
+  };
+
+  const abrirCaixaTab = () => {
+    setSubTab('caixa');
+    setCaixaSubTab('atual');
+    carregarCaixaAtual();
   };
 
   // ---- Pedidos ----
@@ -863,7 +1006,7 @@ export default function PDVScreen({ navigation }) {
   };
 
   // Carrega os itens de uma comanda no carrinho e abre o checkout
-  const iniciarPagamentoComanda = (comanda) => {
+  const iniciarPagamentoComanda = (comanda, clienteNome) => {
     const itens = (comanda.items || []).map((item) => ({
       id: item.estoqueId || item.id,
       name: item.productName || item.name,
@@ -874,7 +1017,7 @@ export default function PDVScreen({ navigation }) {
       fromComanda: true,
     }));
     setCarrinho(itens);
-    setComandaEmPagamento(comanda);
+    setComandaEmPagamento({ ...comanda, clienteNome: clienteNome || comanda.clienteNome });
     setFormaSelecionada(null);
     setValorRecebido('');
     setSenhaVale('');
@@ -1261,7 +1404,8 @@ export default function PDVScreen({ navigation }) {
         )}
         {isAdmin && (
           <Chip
-            onPress={() => navigation.navigate('CashRegister')}
+            selected={subTab === 'caixa'}
+            onPress={abrirCaixaTab}
             style={styles.subTabChip}
             icon="cash-register"
           >
@@ -1283,28 +1427,96 @@ export default function PDVScreen({ navigation }) {
           />
 
           <ScrollView style={styles.produtosList}>
-            {produtosFiltrados.map((produto) => (
-              <Card key={produto.id} style={styles.produtoCard}>
-                <Card.Content>
-                  <View style={styles.produtoInfo}>
-                    <View style={styles.produtoTexto}>
-                      <Text style={styles.produtoNome}>{produto.name}</Text>
-                      <Text style={styles.produtoUnidade}>
-                        {produto.unit} · estoque: {produto.quantity}
-                      </Text>
-                      <Text style={styles.produtoPreco}>
-                        R$ {formatarValor(produto.value || 0)}
-                      </Text>
-                    </View>
-                    <IconButton
-                      icon="plus"
-                      mode="contained"
-                      onPress={() => adicionarAoCarrinho(produto)}
-                    />
-                  </View>
-                </Card.Content>
-              </Card>
-            ))}
+            {(() => {
+              // Agrupa produtos pelo productId (mesmo produto, unidades diferentes)
+              const groups = {};
+              produtosFiltrados.forEach((p) => {
+                const key = p.productId != null ? `prod-${p.productId}` : `solo-${p.id}`;
+                if (!groups[key]) groups[key] = [];
+                groups[key].push(p);
+              });
+
+              return Object.entries(groups).map(([key, items]) => {
+                if (items.length === 1) {
+                  const produto = items[0];
+                  return (
+                    <Card key={produto.id} style={styles.produtoCard}>
+                      <Card.Content>
+                        <View style={styles.produtoInfo}>
+                          <View style={styles.produtoTexto}>
+                            <Text style={styles.produtoNome}>{produto.name}</Text>
+                            <Text style={styles.produtoUnidade}>
+                              {produto.unit} · estoque: {produto.quantity}
+                            </Text>
+                            <Text style={styles.produtoPreco}>
+                              R$ {formatarValor(produto.value || 0)}
+                            </Text>
+                          </View>
+                          <IconButton
+                            icon="plus"
+                            mode="contained"
+                            disabled={produto.quantity <= 0}
+                            onPress={() => adicionarAoCarrinho(produto)}
+                          />
+                        </View>
+                      </Card.Content>
+                    </Card>
+                  );
+                }
+
+                // Múltiplas unidades — mostra seletor de unidade
+                const selectedId = selectedProductUnits[key] ?? items[0].id;
+                const selecionado = items.find((i) => i.id === selectedId) || items[0];
+                return (
+                  <Card key={key} style={styles.produtoCard}>
+                    <Card.Content>
+                      <View style={styles.produtoInfo}>
+                        <View style={styles.produtoTexto}>
+                          <Text style={styles.produtoNome}>{selecionado.name}</Text>
+                          <Text style={styles.produtoUnidade}>
+                            {selecionado.unit} · estoque: {selecionado.quantity}
+                          </Text>
+                          <Text style={styles.produtoPreco}>
+                            R$ {formatarValor(selecionado.value || 0)}
+                          </Text>
+                        </View>
+                        <IconButton
+                          icon="plus"
+                          mode="contained"
+                          disabled={selecionado.quantity <= 0}
+                          onPress={() => adicionarAoCarrinho(selecionado)}
+                        />
+                      </View>
+                      <View style={styles.unitOptionsRow}>
+                        {items.map((item) => {
+                          const ativo = selectedId === item.id;
+                          const esgotado = item.quantity <= 0;
+                          return (
+                            <Chip
+                              key={item.id}
+                              compact
+                              selected={ativo}
+                              onPress={() =>
+                                setSelectedProductUnits((prev) => ({ ...prev, [key]: item.id }))
+                              }
+                              style={[
+                                styles.unitOptionChip,
+                                ativo && styles.unitOptionChipActive,
+                                esgotado && styles.unitOptionChipOut,
+                              ]}
+                              textStyle={styles.unitOptionChipText}
+                            >
+                              {item.unit} · R$ {formatarValor(item.value || 0)}
+                              {esgotado ? ' ✕' : ''}
+                            </Chip>
+                          );
+                        })}
+                      </View>
+                    </Card.Content>
+                  </Card>
+                );
+              });
+            })()}
           </ScrollView>
         </View>
 
@@ -1380,32 +1592,45 @@ export default function PDVScreen({ navigation }) {
           ) : comandas.length === 0 ? (
             <Text style={styles.subModuloVazio}>Nenhuma comanda pendente.</Text>
           ) : (
-            comandas.map((comanda) => {
-              const totalComanda = (comanda.items || []).reduce(
-                (t, i) => t + (i.unitPrice ?? i.price ?? 0) * (i.quantity || 0),
-                0
-              );
-              return (
-                <Card key={comanda.id} style={styles.comandaCard}>
-                  <Card.Content>
-                    <Text style={styles.comandaCliente}>
-                      {comanda.clienteNome || comanda.customerName || `Comanda #${comanda.id}`}
+            comandas.map((cliente) => (
+              <Card key={cliente.id} style={styles.comandaCard}>
+                <Card.Content>
+                  <View style={styles.comandaClienteHeader}>
+                    <Text style={styles.comandaCliente}>{cliente.name}</Text>
+                    <Text style={styles.comandaClienteTotal}>
+                      Em aberto: R$ {formatarValor(cliente.totalComandas || 0)}
                     </Text>
-                    <Text style={styles.comandaInfo}>
-                      {(comanda.items || []).length} item(ns) · Total: R$ {formatarValor(totalComanda)}
-                    </Text>
-                    <Button
-                      mode="contained"
-                      icon="cash"
-                      onPress={() => iniciarPagamentoComanda(comanda)}
-                      style={styles.comandaPagarBtn}
-                    >
-                      Pagar comanda
-                    </Button>
-                  </Card.Content>
-                </Card>
-              );
-            })
+                  </View>
+                  {(cliente.comandas || []).map((comanda) => (
+                    <View key={comanda.id} style={styles.comandaSubCard}>
+                      <View style={styles.comandaSubTop}>
+                        <Text style={styles.comandaSubId}>#{comanda.id}</Text>
+                        <Text style={styles.comandaSubValor}>
+                          R$ {formatarValor(comanda.total || 0)}
+                        </Text>
+                      </View>
+                      <Text style={styles.comandaInfo}>
+                        {(comanda.items || []).length} item(ns)
+                        {(comanda.items || []).length > 0
+                          ? ` · ${(comanda.items || [])
+                              .map((i) => `${i.quantity}x ${i.productName}`)
+                              .join(', ')}`
+                          : ''}
+                      </Text>
+                      <Button
+                        mode="contained"
+                        icon="cash"
+                        compact
+                        onPress={() => iniciarPagamentoComanda(comanda, cliente.name)}
+                        style={styles.comandaPagarBtn}
+                      >
+                        Pagar comanda
+                      </Button>
+                    </View>
+                  ))}
+                </Card.Content>
+              </Card>
+            ))
           )}
         </ScrollView>
       )}
@@ -2102,16 +2327,45 @@ export default function PDVScreen({ navigation }) {
                   <Text style={styles.subModuloVazio}>Nenhuma forma cadastrada.</Text>
                 ) : (
                   formasConfig.map((f) => (
-                    <View key={f.id} style={styles.configItemRow}>
-                      <Text style={[styles.configItemNome, { flex: 1 }]}>
-                        {f.nome} {f.ativo === false ? '(inativa)' : ''}
-                      </Text>
-                      <IconButton
-                        icon={f.ativo === false ? 'toggle-switch-off' : 'toggle-switch'}
-                        iconColor={f.ativo === false ? '#999' : '#4caf50'}
-                        onPress={() => toggleFormaConfig(f.id, f.ativo)}
-                      />
-                      <IconButton icon="delete" iconColor="#ff6b6b" onPress={() => excluirFormaConfig(f.id)} />
+                    <View key={f.id} style={styles.formaConfigBlock}>
+                      <View style={styles.configItemRow}>
+                        <Text style={[styles.configItemNome, { flex: 1 }]}>
+                          {f.nome} {f.ativo === false ? '(inativa)' : ''}
+                        </Text>
+                        <IconButton
+                          icon={f.ativo === false ? 'toggle-switch-off' : 'toggle-switch'}
+                          iconColor={f.ativo === false ? '#999' : '#4caf50'}
+                          onPress={() => toggleFormaConfig(f.id, f.ativo)}
+                        />
+                        <IconButton icon="delete" iconColor="#ff6b6b" onPress={() => excluirFormaConfig(f.id)} />
+                      </View>
+                      <View style={styles.formaPointRow}>
+                        <Checkbox.Android
+                          status={f.pointEnabled ? 'checked' : 'unchecked'}
+                          color="#2196F3"
+                          disabled={!pointConfig?.tokenConfigured}
+                          onPress={() => togglePointForma(f.id, 'pointEnabled', !f.pointEnabled)}
+                        />
+                        <Text style={styles.formaPointLabel}>
+                          Maquininha (Point){!pointConfig?.tokenConfigured ? ' — indisponível' : ''}
+                        </Text>
+                      </View>
+                      {f.pointEnabled && (
+                        <View style={styles.formaPointPickerWrap}>
+                          <Picker
+                            selectedValue={f.pointType || ''}
+                            onValueChange={(v) => togglePointForma(f.id, 'pointType', v || null)}
+                            style={styles.formaPointPicker}
+                            dropdownIconColor="#fff"
+                          >
+                            <Picker.Item label="Cliente escolhe no terminal" value="" color="#000" />
+                            <Picker.Item label="Crédito" value="credit_card" color="#000" />
+                            <Picker.Item label="Débito" value="debit_card" color="#000" />
+                            <Picker.Item label="Pix (QR na tela)" value="pix_online" color="#000" />
+                          </Picker>
+                        </View>
+                      )}
+                      <Divider style={styles.formaConfigDivider} />
                     </View>
                   ))
                 )}
@@ -2287,6 +2541,352 @@ export default function PDVScreen({ navigation }) {
             </>
           )}
         </ScrollView>
+      )}
+
+      {/* Sub-módulo: Caixa (sub-caixa diário) */}
+      {subTab === 'caixa' && (
+        <View style={styles.subModuloContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.caixaSubTabBar}
+            contentContainerStyle={styles.subTabBarContent}
+          >
+            {[
+              { k: 'atual', label: 'Caixa Atual', icon: 'cash' },
+              { k: 'historico', label: 'Histórico', icon: 'history' },
+              { k: 'gastosbar', label: 'Gastos Bar', icon: 'glass-mug-variant' },
+              { k: 'origens', label: 'Origens', icon: 'layers' },
+            ].map((t) => (
+              <Chip
+                key={t.k}
+                selected={caixaSubTab === t.k}
+                icon={t.icon}
+                style={styles.subTabChip}
+                onPress={() => {
+                  setCaixaSubTab(t.k);
+                  if (t.k === 'atual') carregarCaixaAtual();
+                  if (t.k === 'historico') carregarCaixaHistorico();
+                  if (t.k === 'gastosbar') carregarGastosBar();
+                  if (t.k === 'origens') carregarOrigemSaldos();
+                }}
+              >
+                {t.label}
+              </Chip>
+            ))}
+          </ScrollView>
+
+          <ScrollView style={styles.caixaContent}>
+            {/* ---- CAIXA ATUAL ---- */}
+            {caixaSubTab === 'atual' && (
+              caixaAtual && caixaAtual.status === 'ABERTO' ? (
+                <>
+                  <Card style={styles.caixaCard}>
+                    <Card.Content>
+                      <View style={styles.caixaStatusRow}>
+                        <Chip icon="door-open" style={styles.caixaBadgeAberto} textStyle={{ color: '#fff' }}>
+                          ABERTO
+                        </Chip>
+                        <Text style={styles.caixaStatusTime}>
+                          {new Date(caixaAtual.abertoEm).toLocaleString('pt-BR')}
+                        </Text>
+                      </View>
+                      <View style={styles.caixaResumoGrid}>
+                        <View style={styles.caixaResumoItem}>
+                          <Text style={styles.caixaResumoLabel}>Saldo Inicial</Text>
+                          <Text style={styles.caixaResumoValor}>
+                            R$ {formatarValor((caixaAtual.saldoInicial || 0) + (caixaAtual.totalAdd || 0))}
+                          </Text>
+                        </View>
+                        <View style={styles.caixaResumoItem}>
+                          <Text style={styles.caixaResumoLabel}>Entradas</Text>
+                          <Text style={[styles.caixaResumoValor, { color: '#4caf50' }]}>
+                            R$ {formatarValor((caixaAtual.totalEntradas || 0) - (caixaAtual.totalAdd || 0))}
+                          </Text>
+                        </View>
+                        <View style={styles.caixaResumoItem}>
+                          <Text style={styles.caixaResumoLabel}>Saídas</Text>
+                          <Text style={[styles.caixaResumoValor, { color: '#ff6b6b' }]}>
+                            R$ {formatarValor(caixaAtual.totalSaidas || 0)}
+                          </Text>
+                        </View>
+                        <View style={styles.caixaResumoItem}>
+                          <Text style={styles.caixaResumoLabel}>Saldo Atual</Text>
+                          <Text style={[styles.caixaResumoValor, { color: '#2196F3', fontSize: 18 }]}>
+                            R$ {formatarValor(caixaAtual.saldoAtual || 0)}
+                          </Text>
+                        </View>
+                      </View>
+                      <Button
+                        mode="contained"
+                        icon="door-closed"
+                        onPress={() => setFecharCaixaVisible(true)}
+                        style={styles.caixaBtnFechar}
+                      >
+                        Fechar Caixa
+                      </Button>
+                    </Card.Content>
+                  </Card>
+
+                  <Text style={styles.secaoLabel}>Movimentações do Caixa</Text>
+                  {(caixaAtual.transacoes || []).length === 0 ? (
+                    <Text style={styles.subModuloVazio}>Nenhuma movimentação registrada.</Text>
+                  ) : (
+                    (caixaAtual.transacoes || []).map((t) => (
+                      <View key={t.id} style={styles.caixaTransacaoRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.caixaTransacaoCat}>{t.categoria}</Text>
+                          {t.descricao ? (
+                            <Text style={styles.caixaTransacaoDesc}>{t.descricao}</Text>
+                          ) : null}
+                          <Text style={styles.caixaTransacaoTime}>
+                            {new Date(t.createdAt).toLocaleString('pt-BR', {
+                              day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+                            })}
+                            {t.userName ? ` — ${t.userName}` : ''}
+                          </Text>
+                        </View>
+                        <Text
+                          style={[
+                            styles.caixaTransacaoValor,
+                            { color: t.tipo === 'ENTRADA' ? '#4caf50' : '#ff6b6b' },
+                          ]}
+                        >
+                          {t.tipo === 'ENTRADA' ? '+' : '-'} R$ {formatarValor(t.valor || 0)}
+                        </Text>
+                      </View>
+                    ))
+                  )}
+                </>
+              ) : (
+                <Card style={styles.caixaCard}>
+                  <Card.Content style={{ alignItems: 'center' }}>
+                    <IconButton icon="door-closed" size={40} iconColor="#999" />
+                    <Text style={styles.caixaFechadoTitulo}>Nenhum caixa aberto</Text>
+                    {caixaAtual?.ultimoFechado ? (
+                      <Text style={styles.caixaFechadoInfo}>
+                        Último fechado em{' '}
+                        {new Date(caixaAtual.ultimoFechado.fechadoEm).toLocaleString('pt-BR')}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.caixaFechadoInfo}>Horário de funcionamento: 17h às 06h</Text>
+                    <Button
+                      mode="contained"
+                      icon="door-open"
+                      onPress={() => setAbrirCaixaVisible(true)}
+                      style={styles.caixaBtnAbrir}
+                    >
+                      Abrir Novo Caixa
+                    </Button>
+                  </Card.Content>
+                </Card>
+              )
+            )}
+
+            {/* ---- HISTÓRICO ---- */}
+            {caixaSubTab === 'historico' && (
+              caixaHistorico.length === 0 ? (
+                <Text style={styles.subModuloVazio}>Nenhum registro de caixa encontrado.</Text>
+              ) : (
+                caixaHistorico.map((caixa) => (
+                  <Card key={caixa.id} style={styles.caixaCard}>
+                    <Card.Content>
+                      <View style={styles.caixaStatusRow}>
+                        <Chip
+                          icon={caixa.status === 'ABERTO' ? 'door-open' : 'door-closed'}
+                          style={caixa.status === 'ABERTO' ? styles.caixaBadgeAberto : styles.caixaBadgeFechado}
+                          textStyle={{ color: '#fff', fontSize: 11 }}
+                        >
+                          {caixa.status}
+                        </Chip>
+                        <Text style={styles.caixaStatusTime}>
+                          {new Date(caixa.abertoEm).toLocaleString('pt-BR', {
+                            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+                          })}
+                          {caixa.fechadoEm
+                            ? ` → ${new Date(caixa.fechadoEm).toLocaleString('pt-BR', {
+                                day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+                              })}`
+                            : ''}
+                        </Text>
+                      </View>
+                      <View style={styles.caixaHistResumo}>
+                        <Text style={styles.caixaHistItem}>Inicial: R$ {formatarValor(caixa.saldoInicial || 0)}</Text>
+                        <Text style={[styles.caixaHistItem, { color: '#4caf50' }]}>Entradas: R$ {formatarValor(caixa.totalEntradas || 0)}</Text>
+                        <Text style={[styles.caixaHistItem, { color: '#ff6b6b' }]}>Saídas: R$ {formatarValor(caixa.totalSaidas || 0)}</Text>
+                        <Text style={[styles.caixaHistItem, { color: '#2196F3' }]}>
+                          Final: R$ {formatarValor(caixa.saldoFinal ?? ((caixa.saldoInicial || 0) + (caixa.totalEntradas || 0) - (caixa.totalSaidas || 0)))}
+                        </Text>
+                      </View>
+                      {caixa.abertoPorNome ? (
+                        <Text style={styles.caixaTransacaoTime}>Aberto por: {caixa.abertoPorNome}</Text>
+                      ) : null}
+                      {caixa.fechadoPorNome ? (
+                        <Text style={styles.caixaTransacaoTime}>Fechado por: {caixa.fechadoPorNome}</Text>
+                      ) : null}
+                      {caixa.observacao ? (
+                        <Text style={styles.caixaTransacaoDesc}>📝 {caixa.observacao}</Text>
+                      ) : null}
+                    </Card.Content>
+                  </Card>
+                ))
+              )
+            )}
+
+            {/* ---- GASTOS BAR ---- */}
+            {caixaSubTab === 'gastosbar' && (
+              <>
+                <View style={styles.tipoRow}>
+                  <Chip
+                    selected={gastosBarView === 'semanas'}
+                    onPress={() => setGastosBarView('semanas')}
+                    style={styles.chip}
+                  >
+                    Por Semana
+                  </Chip>
+                  <Chip
+                    selected={gastosBarView === 'funcionarios'}
+                    onPress={() => setGastosBarView('funcionarios')}
+                    style={styles.chip}
+                  >
+                    Por Funcionário
+                  </Chip>
+                </View>
+                <Text style={styles.gastosBarNota}>
+                  Somente visualização. Lançamentos são gerados automaticamente por vendas em Vale
+                  e por vales em dinheiro no PDV.
+                </Text>
+                {loadingGastosBar ? (
+                  <ActivityIndicator color="#2196F3" style={{ marginTop: 16 }} />
+                ) : gastosBarView === 'semanas' ? (
+                  gastosBarSemanas.length === 0 ? (
+                    <Text style={styles.subModuloVazio}>Nenhum gasto registrado.</Text>
+                  ) : (
+                    gastosBarSemanas.map((semana, idx) => (
+                      <Card key={idx} style={styles.caixaCard}>
+                        <Card.Content>
+                          <Text style={styles.gastosBarSemanaTitulo}>
+                            📅 Semana de {new Date(semana.semana + 'T00:00:00').toLocaleDateString('pt-BR')}
+                          </Text>
+                          <View style={styles.gastosBarTags}>
+                            {semana.totalProdutos > 0 && (
+                              <Text style={styles.gastosBarTag}>🍺 R$ {formatarValor(semana.totalProdutos)}</Text>
+                            )}
+                            {semana.totalVales > 0 && (
+                              <Text style={styles.gastosBarTag}>💵 R$ {formatarValor(semana.totalVales)}</Text>
+                            )}
+                            {semana.totalDescontos > 0 && (
+                              <Text style={styles.gastosBarTag}>🏷️ R$ {formatarValor(semana.totalDescontos)}</Text>
+                            )}
+                            <Text style={[styles.gastosBarTag, { color: '#fff', fontWeight: 'bold' }]}>
+                              Total: R$ {formatarValor(semana.total || 0)}
+                            </Text>
+                          </View>
+                        </Card.Content>
+                      </Card>
+                    ))
+                  )
+                ) : gastosBarResumo.length === 0 ? (
+                  <Text style={styles.subModuloVazio}>Nenhum gasto por funcionário.</Text>
+                ) : (
+                  gastosBarResumo.map((func, idx) => (
+                    <Card key={idx} style={styles.caixaCard}>
+                      <Card.Content>
+                        <View style={styles.caixaStatusRow}>
+                          <Text style={styles.gastosBarFuncNome}>👤 {func.funcionario}</Text>
+                          <Text style={styles.caixaHistItem}>Total: R$ {formatarValor(func.total || 0)}</Text>
+                        </View>
+                        <View style={styles.gastosBarTags}>
+                          <Text style={styles.gastosBarTag}>🍺 R$ {formatarValor(func.totalProdutos || 0)}</Text>
+                          <Text style={styles.gastosBarTag}>💵 R$ {formatarValor(func.totalVales || 0)}</Text>
+                          <Text style={styles.gastosBarTag}>🏷️ R$ {formatarValor(func.totalDescontos || 0)}</Text>
+                        </View>
+                      </Card.Content>
+                    </Card>
+                  ))
+                )}
+              </>
+            )}
+
+            {/* ---- ORIGENS ---- */}
+            {caixaSubTab === 'origens' && (
+              <>
+                <View style={styles.saldosRow}>
+                  {['BAG', 'MÁQUINA', 'CAIXA'].map((nome) => {
+                    const og = origemSaldos.find((o) => o.nome === nome);
+                    const saldo = og?.saldo ?? og?.valor ?? 0;
+                    return (
+                      <View key={nome} style={styles.saldoChip}>
+                        <Text style={styles.saldoNome}>{nome}</Text>
+                        <Text
+                          style={[
+                            styles.saldoValor,
+                            { color: saldo < 0 ? '#ff6b6b' : saldo === 0 ? '#999' : '#4caf50' },
+                          ]}
+                        >
+                          R$ {formatarValor(saldo)}
+                        </Text>
+                        <Button
+                          compact
+                          mode="text"
+                          textColor="#2196F3"
+                          onPress={() => carregarOrigemHistorico(nome)}
+                        >
+                          {origemHistoricoNome === nome ? 'Fechar' : 'Histórico'}
+                        </Button>
+                      </View>
+                    );
+                  })}
+                </View>
+
+                {origemHistoricoNome && (
+                  <Card style={styles.caixaCard}>
+                    <Card.Content>
+                      <Text style={styles.secaoLabel}>Histórico — {origemHistoricoNome}</Text>
+                      {loadingOrigemHistorico ? (
+                        <ActivityIndicator color="#2196F3" style={{ marginTop: 8 }} />
+                      ) : origemHistoricoMovs.length === 0 ? (
+                        <Text style={styles.subModuloVazio}>Nenhuma movimentação registrada.</Text>
+                      ) : (
+                        origemHistoricoMovs.map((m) => (
+                          <View key={m.id} style={styles.caixaTransacaoRow}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.caixaTransacaoDesc}>{m.descricao || '—'}</Text>
+                              <Text style={styles.caixaTransacaoTime}>
+                                {new Date(m.createdAt).toLocaleString('pt-BR', {
+                                  day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+                                })}
+                                {'  · saldo: R$ '}
+                                {formatarValor(m.saldoDepois || 0)}
+                              </Text>
+                            </View>
+                            <Text
+                              style={[
+                                styles.caixaTransacaoValor,
+                                { color: m.tipo === 'ENTRADA' ? '#4caf50' : m.tipo === 'SAIDA' ? '#ff6b6b' : '#bbb' },
+                              ]}
+                            >
+                              {m.tipo === 'ENTRADA' ? '+' : m.tipo === 'SAIDA' ? '-' : ''} R$ {formatarValor(m.valor || 0)}
+                            </Text>
+                          </View>
+                        ))
+                      )}
+                    </Card.Content>
+                  </Card>
+                )}
+
+                <Button
+                  mode="outlined"
+                  icon="refresh"
+                  onPress={carregarOrigemSaldos}
+                  style={{ marginTop: 8 }}
+                >
+                  Atualizar Saldos
+                </Button>
+              </>
+            )}
+          </ScrollView>
+        </View>
       )}
 
       {/* Modal de checkout */}
@@ -2510,6 +3110,102 @@ export default function PDVScreen({ navigation }) {
             Cancelar
           </Button>
         </Modal>
+
+        {/* Modal Abrir Caixa */}
+        <Modal
+          visible={abrirCaixaVisible}
+          onDismiss={() => setAbrirCaixaVisible(false)}
+          contentContainerStyle={styles.modalContent}
+        >
+          <Text style={styles.modalTitle}>Abrir Novo Caixa</Text>
+          <Text style={styles.caixaFechadoInfo}>Horário de funcionamento: 17h às 06h</Text>
+          <TextInput
+            label="Saldo Inicial — CAIXA (R$)"
+            mode="outlined"
+            dense
+            keyboardType="numeric"
+            value={caixaSaldoInicial}
+            onChangeText={setCaixaSaldoInicial}
+            style={styles.saqueInput}
+          />
+          <View style={styles.tipoRow}>
+            <TextInput
+              label="Saldo BAG (R$)"
+              mode="outlined"
+              dense
+              keyboardType="numeric"
+              value={caixaOrigemBAG}
+              onChangeText={setCaixaOrigemBAG}
+              style={styles.flexInput}
+            />
+            <TextInput
+              label="Saldo MÁQUINA (R$)"
+              mode="outlined"
+              dense
+              keyboardType="numeric"
+              value={caixaOrigemMAQUINA}
+              onChangeText={setCaixaOrigemMAQUINA}
+              style={styles.flexInput}
+            />
+          </View>
+          <TextInput
+            label="Observação (opcional)"
+            mode="outlined"
+            dense
+            value={caixaObsAbrir}
+            onChangeText={setCaixaObsAbrir}
+            style={styles.saqueInput}
+          />
+          <View style={styles.modalActions}>
+            <Button mode="outlined" onPress={() => setAbrirCaixaVisible(false)} textColor="#fff">
+              Cancelar
+            </Button>
+            <Button
+              mode="contained"
+              icon="door-open"
+              onPress={abrirCaixa}
+              loading={savingCaixa}
+              disabled={savingCaixa}
+            >
+              Abrir Caixa
+            </Button>
+          </View>
+        </Modal>
+
+        {/* Modal Fechar Caixa */}
+        <Modal
+          visible={fecharCaixaVisible}
+          onDismiss={() => setFecharCaixaVisible(false)}
+          contentContainerStyle={styles.modalContent}
+        >
+          <Text style={styles.modalTitle}>Fechar Caixa</Text>
+          <Text style={styles.caixaFechadoInfo}>
+            Saldo atual: R$ {formatarValor(caixaAtual?.saldoAtual || 0)}
+          </Text>
+          <TextInput
+            label="Observação de fechamento (opcional)"
+            mode="outlined"
+            dense
+            value={caixaObsFechar}
+            onChangeText={setCaixaObsFechar}
+            style={styles.saqueInput}
+          />
+          <View style={styles.modalActions}>
+            <Button mode="outlined" onPress={() => setFecharCaixaVisible(false)} textColor="#fff">
+              Cancelar
+            </Button>
+            <Button
+              mode="contained"
+              icon="door-closed"
+              buttonColor="#e53935"
+              onPress={fecharCaixa}
+              loading={savingCaixa}
+              disabled={savingCaixa}
+            >
+              Fechar Caixa
+            </Button>
+          </View>
+        </Modal>
       </Portal>
     </View>
   );
@@ -2571,6 +3267,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#2196F3',
     fontWeight: 'bold',
+  },
+  unitOptionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 8,
+    gap: 6,
+  },
+  unitOptionChip: {
+    backgroundColor: '#2a2a2a',
+  },
+  unitOptionChipActive: {
+    backgroundColor: '#1565C0',
+  },
+  unitOptionChipOut: {
+    opacity: 0.5,
+  },
+  unitOptionChipText: {
+    color: '#fff',
+    fontSize: 12,
   },
   carrinhoCard: {
     marginBottom: 8,
@@ -2673,6 +3388,141 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 6,
   },
+  caixaSubTabBar: {
+    flexGrow: 0,
+    flexShrink: 0,
+    paddingVertical: 6,
+    marginBottom: 8,
+  },
+  caixaContent: {
+    flex: 1,
+  },
+  caixaCard: {
+    backgroundColor: '#1a1a1a',
+    marginBottom: 10,
+  },
+  caixaStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    marginBottom: 8,
+  },
+  caixaBadgeAberto: {
+    backgroundColor: '#2e7d32',
+  },
+  caixaBadgeFechado: {
+    backgroundColor: '#555',
+  },
+  caixaStatusTime: {
+    color: '#bbb',
+    fontSize: 12,
+    flexShrink: 1,
+  },
+  caixaResumoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  caixaResumoItem: {
+    width: '50%',
+    paddingVertical: 6,
+  },
+  caixaResumoLabel: {
+    color: '#999',
+    fontSize: 12,
+  },
+  caixaResumoValor: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  caixaBtnFechar: {
+    backgroundColor: '#e53935',
+    marginTop: 10,
+  },
+  caixaBtnAbrir: {
+    backgroundColor: '#4caf50',
+    marginTop: 12,
+  },
+  caixaTransacaoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#151515',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 6,
+  },
+  caixaTransacaoCat: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
+  caixaTransacaoDesc: {
+    color: '#ccc',
+    fontSize: 12,
+  },
+  caixaTransacaoTime: {
+    color: '#888',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  caixaTransacaoValor: {
+    fontWeight: 'bold',
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  caixaFechadoTitulo: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 4,
+  },
+  caixaFechadoInfo: {
+    color: '#999',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  caixaHistResumo: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginVertical: 4,
+  },
+  caixaHistItem: {
+    color: '#ddd',
+    fontSize: 12,
+  },
+  gastosBarNota: {
+    color: '#888',
+    fontSize: 11,
+    marginBottom: 8,
+  },
+  gastosBarSemanaTitulo: {
+    color: '#fff',
+    fontWeight: 'bold',
+    marginBottom: 6,
+  },
+  gastosBarTags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  gastosBarTag: {
+    color: '#ddd',
+    fontSize: 12,
+  },
+  gastosBarFuncNome: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 14,
+  },
   descontoRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2753,8 +3603,8 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   subTabBar: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexGrow: 0,
+    flexShrink: 0,
     paddingHorizontal: 8,
     paddingVertical: 6,
     backgroundColor: '#1a1a1a',
@@ -2792,6 +3642,38 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  comandaClienteHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  comandaClienteTotal: {
+    color: '#4caf50',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  comandaSubCard: {
+    backgroundColor: '#111',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
+  },
+  comandaSubTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  comandaSubId: {
+    color: '#2196F3',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
+  comandaSubValor: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
   comandaInfo: {
     color: '#bbb',
@@ -2963,6 +3845,31 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '500',
+  },
+  formaConfigBlock: {
+    marginBottom: 4,
+  },
+  formaPointRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  formaPointLabel: {
+    color: '#ccc',
+    fontSize: 13,
+  },
+  formaPointPickerWrap: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 6,
+    marginTop: 4,
+    marginLeft: 8,
+  },
+  formaPointPicker: {
+    color: '#fff',
+  },
+  formaConfigDivider: {
+    backgroundColor: '#333',
+    marginTop: 6,
   },
   configItemSub: {
     color: '#999',

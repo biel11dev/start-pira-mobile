@@ -23,9 +23,11 @@ import api from '../services/api';
 
 export default function DespesaScreen({ navigation }) {
   const [despesas, setDespesas] = useState([]);
-  const [categorias, setCategorias] = useState([]);
+  const [tiposDespesa, setTiposDespesa] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalEditVisible, setModalEditVisible] = useState(false);
+  const [tiposModalVisible, setTiposModalVisible] = useState(false);
+  const [novoTipo, setNovoTipo] = useState('');
   const [loading, setLoading] = useState(false);
   const [expandidas, setExpandidas] = useState({});
   
@@ -36,9 +38,8 @@ export default function DespesaScreen({ navigation }) {
   const [nomeDespesa, setNomeDespesa] = useState('');
   const [valorDespesa, setValorDespesa] = useState('');
   const [descricao, setDescricao] = useState('');
-  const [categoriaId, setCategoriaId] = useState('');
   const [dataDespesa, setDataDespesa] = useState(new Date().toISOString().split('T')[0]);
-  const [despesaFixa, setDespesaFixa] = useState('Variável');
+  const [despesaFixa, setDespesaFixa] = useState(false);
 
   // Edit
   const [despesaEditando, setDespesaEditando] = useState(null);
@@ -49,12 +50,12 @@ export default function DespesaScreen({ navigation }) {
 
   const carregarDados = async () => {
     try {
-      const [despesasRes, categoriasRes] = await Promise.all([
+      const [despesasRes, tiposRes] = await Promise.all([
         api.get('/api/despesas'),
-        api.get('/api/categories'),
+        api.get('/api/cadastrodesp'),
       ]);
       setDespesas(despesasRes.data || []);
-      setCategorias(categoriasRes.data || []);
+      setTiposDespesa(tiposRes.data || []);
     } catch (error) {
       console.error('Erro ao carregar despesas:', error);
     }
@@ -62,7 +63,7 @@ export default function DespesaScreen({ navigation }) {
 
   const adicionarDespesa = async () => {
     if (!nomeDespesa || !valorDespesa) {
-      Alert.alert('Atenção', 'Preencha os campos obrigatórios');
+      Alert.alert('Atenção', 'Selecione a despesa e informe o valor');
       return;
     }
 
@@ -72,9 +73,29 @@ export default function DespesaScreen({ navigation }) {
         nomeDespesa,
         valorDespesa: parseFloat(valorDespesa),
         descDespesa: descricao || null,
-        date: dataDespesa,
+        date: `${dataDespesa} 00:00:00`,
         DespesaFixa: despesaFixa,
       });
+
+      // Despesa fixa: cria lançamentos (valor 0) para os meses restantes do ano
+      if (despesaFixa) {
+        const base = new Date(dataDespesa);
+        const year = base.getFullYear();
+        const requests = [];
+        for (let m = base.getMonth() + 1; m <= 11; m++) {
+          const mm = String(m + 1).padStart(2, '0');
+          requests.push(
+            api.post('/api/despesas', {
+              nomeDespesa,
+              valorDespesa: 0,
+              descDespesa: null,
+              date: `${year}-${mm}-02 00:00:00`,
+              DespesaFixa: true,
+            })
+          );
+        }
+        if (requests.length) await Promise.all(requests);
+      }
 
       Alert.alert('Sucesso', 'Despesa registrada!');
       setModalVisible(false);
@@ -150,9 +171,42 @@ export default function DespesaScreen({ navigation }) {
     setNomeDespesa('');
     setValorDespesa('');
     setDescricao('');
-    setCategoriaId('');
     setDataDespesa(new Date().toISOString().split('T')[0]);
-    setDespesaFixa('Variável');
+    setDespesaFixa(false);
+  };
+
+  const adicionarTipoDespesa = async () => {
+    const nome = novoTipo.trim();
+    if (!nome) return;
+    if (tiposDespesa.some((t) => t.nomeDespesa === nome)) {
+      Alert.alert('Atenção', 'Este tipo já existe.');
+      return;
+    }
+    try {
+      await api.post('/api/cadastrodesp', { nomeDespesa: nome });
+      setNovoTipo('');
+      carregarDados();
+    } catch (error) {
+      Alert.alert('Erro', 'Erro ao cadastrar tipo de despesa');
+    }
+  };
+
+  const excluirTipoDespesa = (id) => {
+    Alert.alert('Confirmar', 'Excluir este tipo de despesa?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Excluir',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.delete(`/api/cadastrodesp/${id}`);
+            carregarDados();
+          } catch (error) {
+            Alert.alert('Erro', 'Erro ao excluir tipo de despesa');
+          }
+        },
+      },
+    ]);
   };
 
   const mesAnterior = () => {
@@ -363,21 +417,31 @@ export default function DespesaScreen({ navigation }) {
             <View style={styles.pickerContainer}>
               <Text style={styles.pickerLabel}>Selecione a despesa</Text>
               <Picker
-                selectedValue={categoriaId}
-                onValueChange={setCategoriaId}
+                selectedValue={nomeDespesa}
+                onValueChange={setNomeDespesa}
                 style={styles.picker}
                 dropdownIconColor="#fff"
               >
                 <Picker.Item label="Selecione a despesa" value="" />
-                {categorias.map((cat) => (
+                {tiposDespesa.map((tipo) => (
                   <Picker.Item
-                    key={cat.id}
-                    label={cat.nome}
-                    value={cat.id.toString()}
+                    key={tipo.id}
+                    label={tipo.nomeDespesa}
+                    value={tipo.nomeDespesa}
                   />
                 ))}
               </Picker>
             </View>
+
+            <Button
+              mode="text"
+              icon="cog"
+              textColor="#2196F3"
+              onPress={() => setTiposModalVisible(true)}
+              style={{ alignSelf: 'flex-start', marginBottom: 8 }}
+            >
+              Gerenciar tipos de despesa
+            </Button>
 
             <TextInput
               label="Valor (R$) *"
@@ -418,8 +482,8 @@ export default function DespesaScreen({ navigation }) {
                 style={styles.picker}
                 dropdownIconColor="#fff"
               >
-                <Picker.Item label="Variável" value="Variável" />
-                <Picker.Item label="Fixa" value="Fixa" />
+                <Picker.Item label="Variável" value={false} />
+                <Picker.Item label="Fixa" value={true} />
               </Picker>
             </View>
 
@@ -442,6 +506,55 @@ export default function DespesaScreen({ navigation }) {
                 Salvar
               </Button>
             </View>
+          </ScrollView>
+        </Modal>
+
+        {/* Modal Gerenciar Tipos de Despesa */}
+        <Modal
+          visible={tiposModalVisible}
+          onDismiss={() => setTiposModalVisible(false)}
+          contentContainerStyle={styles.modal}
+        >
+          <ScrollView>
+            <Text style={styles.modalTitle}>Tipos de Despesa</Text>
+            <View style={styles.tipoAddRow}>
+              <TextInput
+                label="Novo tipo"
+                value={novoTipo}
+                onChangeText={setNovoTipo}
+                mode="outlined"
+                style={[styles.input, { flex: 1 }]}
+                theme={{ colors: { primary: '#2196F3' } }}
+              />
+              <IconButton
+                icon="plus"
+                iconColor="#4caf50"
+                onPress={adicionarTipoDespesa}
+              />
+            </View>
+            {tiposDespesa.length === 0 ? (
+              <Text style={styles.semDados}>Nenhum tipo cadastrado</Text>
+            ) : (
+              tiposDespesa.map((tipo) => (
+                <View key={tipo.id} style={styles.tipoRow}>
+                  <Text style={styles.tipoNome}>{tipo.nomeDespesa}</Text>
+                  <IconButton
+                    icon="delete"
+                    size={20}
+                    iconColor="#f44336"
+                    onPress={() => excluirTipoDespesa(tipo.id)}
+                  />
+                </View>
+              ))
+            )}
+            <Button
+              mode="outlined"
+              onPress={() => setTiposModalVisible(false)}
+              style={styles.modalButton}
+              labelStyle={styles.cancelButtonLabel}
+            >
+              Fechar
+            </Button>
           </ScrollView>
         </Modal>
       </Portal>
@@ -516,6 +629,23 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  tipoAddRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  tipoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+    paddingVertical: 4,
+  },
+  tipoNome: {
+    color: '#fff',
+    fontSize: 15,
+    flex: 1,
   },
   header: {
     backgroundColor: '#000',

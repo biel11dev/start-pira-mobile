@@ -57,13 +57,27 @@ export default function ListaComprasScreen({ navigation }) {
 
   const totalPendentes = lista.filter((i) => i.status === 'PENDENTE').length;
 
-  // Agrupar por categoria (nome do pai ou categoria)
+  const formatarDataHora = (d) => {
+    if (!d) return '';
+    try {
+      return new Date(d).toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '';
+    }
+  };
+
+  // Agrupar por categoria (pai › sub, igual ao web)
   const grupos = {};
   listaFiltrada.forEach((item) => {
-    const cat =
-      item.estoque?.category?.parent?.name ||
-      item.estoque?.category?.name ||
-      'Sem categoria';
+    const cat = item.estoque?.category?.parent
+      ? `${item.estoque.category.parent.name} › ${item.estoque.category.name}`
+      : item.estoque?.category?.name || 'Sem categoria';
     if (!grupos[cat]) grupos[cat] = [];
     grupos[cat].push(item);
   });
@@ -117,9 +131,19 @@ export default function ListaComprasScreen({ navigation }) {
                           </Text>
                           <Text style={styles.itemInfo}>
                             Atual: {item.quantidadeAtual ?? item.estoque?.quantity ?? 0}
-                            {item.estoque?.unit ? ` ${item.estoque.unit}` : ''} · Ideal:{' '}
+                            {item.estoque?.unit ? ` ${item.estoque.unit}` : ''} · Mínimo:{' '}
                             {item.quantidadeMinima ?? 0}
+                            {item.estoque?.unit ? ` ${item.estoque.unit}` : ''}
                           </Text>
+                          {item.status === 'CONCLUIDO' && item.concluidoEm ? (
+                            <Text style={styles.itemData}>
+                              Comprado em {formatarDataHora(item.concluidoEm)}
+                            </Text>
+                          ) : item.createdAt ? (
+                            <Text style={styles.itemData}>
+                              Registrado em {formatarDataHora(item.createdAt)}
+                            </Text>
+                          ) : null}
                         </View>
                         <Chip
                           style={
@@ -225,6 +249,12 @@ const styles = StyleSheet.create({
     color: '#aaa',
     fontSize: 12,
     marginTop: 4,
+  },
+  itemData: {
+    color: '#777',
+    fontSize: 11,
+    marginTop: 3,
+    fontStyle: 'italic',
   },
   chipPendente: {
     backgroundColor: '#FF9800',

@@ -17,6 +17,7 @@ import {
   Modal,
   Searchbar,
   IconButton,
+  ActivityIndicator,
 } from 'react-native-paper';
 import { Picker } from '@react-native-picker/picker';
 import api from '../services/api';
@@ -104,6 +105,28 @@ export default function FiadoScreen({ navigation }) {
     }
   };
 
+  const excluirCliente = (cliente) => {
+    Alert.alert(
+      'Confirmar Exclusão',
+      `Deseja realmente excluir o cliente "${cliente.name}"?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.delete(`/api/clients/${cliente.id}`);
+              carregarClientes();
+            } catch (error) {
+              Alert.alert('Erro', 'Erro ao excluir cliente');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const adicionarCompra = async () => {
     if (!produtoSelecionado || !quantidade) {
       Alert.alert('Atenção', 'Selecione um produto e digite a quantidade');
@@ -122,6 +145,10 @@ export default function FiadoScreen({ navigation }) {
         total: total,
         date: new Date(dataCompra).toISOString(),
         clientId: clienteSelecionado.id,
+      });
+
+      await api.put(`/api/clients/${clienteSelecionado.id}`, {
+        totalDebt: (clienteSelecionado.totalDebt || 0) + total,
       });
 
       Alert.alert('Sucesso', 'Compra adicionada!');
@@ -150,6 +177,10 @@ export default function FiadoScreen({ navigation }) {
         clientId: clienteSelecionado.id,
       });
 
+      await api.put(`/api/clients/${clienteSelecionado.id}`, {
+        totalDebt: (clienteSelecionado.totalDebt || 0) - parseFloat(valorPagamento),
+      });
+
       Alert.alert('Sucesso', 'Pagamento registrado!');
       setValorPagamento('');
       carregarDetalhesCliente(clienteSelecionado.id);
@@ -172,7 +203,13 @@ export default function FiadoScreen({ navigation }) {
           style: 'destructive',
           onPress: async () => {
             try {
+              const compra = compras.find((c) => c.id === compraId);
               await api.delete(`/api/purchases/${compraId}`);
+              if (compra) {
+                await api.put(`/api/clients/${clienteSelecionado.id}`, {
+                  totalDebt: (clienteSelecionado.totalDebt || 0) - (compra.total || 0),
+                });
+              }
               Alert.alert('Sucesso', 'Compra excluída!');
               carregarDetalhesCliente(clienteSelecionado.id);
             } catch (error) {
@@ -195,7 +232,13 @@ export default function FiadoScreen({ navigation }) {
           style: 'destructive',
           onPress: async () => {
             try {
+              const pagamento = pagamentos.find((p) => p.id === pagamentoId);
               await api.delete(`/api/payments/${pagamentoId}`);
+              if (pagamento) {
+                await api.put(`/api/clients/${clienteSelecionado.id}`, {
+                  totalDebt: (clienteSelecionado.totalDebt || 0) + (pagamento.amount || 0),
+                });
+              }
               Alert.alert('Sucesso', 'Pagamento excluído!');
               carregarDetalhesCliente(clienteSelecionado.id);
             } catch (error) {
@@ -258,11 +301,23 @@ export default function FiadoScreen({ navigation }) {
                 >
                   <Card.Content>
                     <View style={styles.clienteHeader}>
-                      <Text style={styles.clienteNome}>{cliente.name}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.clienteNome}>{cliente.name}</Text>
+                        <Text style={styles.clienteDebt}>
+                          Devedor: R$ {formatarValor(cliente.totalDebt || 0)}
+                        </Text>
+                      </View>
+                      <IconButton
+                        icon="delete"
+                        size={22}
+                        iconColor="#F44336"
+                        onPress={() => excluirCliente(cliente)}
+                      />
                       <IconButton
                         icon="chevron-right"
                         size={24}
                         iconColor="#fff"
+                        onPress={() => carregarDetalhesCliente(cliente.id)}
                       />
                     </View>
                   </Card.Content>
@@ -550,6 +605,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  clienteDebt: {
+    fontSize: 13,
+    color: '#ff6b6b',
+    marginTop: 2,
   },
   fab: {
     position: 'absolute',

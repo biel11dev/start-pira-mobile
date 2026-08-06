@@ -53,6 +53,13 @@ export default function PessoalScreen({ navigation }) {
   // Edit
   const [despesaEditando, setDespesaEditando] = useState(null);
 
+  // Gerenciamento de categorias
+  const [catModalVisible, setCatModalVisible] = useState(false);
+  const [novaCategoria, setNovaCategoria] = useState('');
+  const [catEditandoId, setCatEditandoId] = useState(null);
+  const [catEditNome, setCatEditNome] = useState('');
+  const [savingCat, setSavingCat] = useState(false);
+
   useEffect(() => {
     carregarDados();
   }, [mesAtual]);
@@ -114,6 +121,30 @@ export default function PessoalScreen({ navigation }) {
         }
       }
 
+      // Se for GASTO FIXO, criar entradas com valor 0 para os meses restantes do ano
+      if (tipoMovimento === 'GASTO' && despesaFixa === 'Fixa') {
+        const base = new Date(dataDespesa);
+        const ano = base.getFullYear();
+        const mesInicial = base.getMonth(); // 0-11
+        for (let m = mesInicial + 1; m <= 11; m++) {
+          const mm = String(m + 1).padStart(2, '0');
+          const dateFutura = `${ano}-${mm}-02`;
+          try {
+            await api.post('/api/desp-pessoal', {
+              nomeDespesa: nomeDespesa || 'Sem descrição',
+              valorDespesa: 0,
+              descDespesa: descDespesa || null,
+              date: dateFutura,
+              DespesaFixa: true,
+              categoriaId: catId,
+              tipoMovimento: 'GASTO',
+            });
+          } catch (fixErr) {
+            console.error('Erro ao criar despesa fixa futura:', fixErr);
+          }
+        }
+      }
+
       Alert.alert('Sucesso', valeMarcado ? 'Despesa e VALE adicionados!' : 'Despesa registrada!');
       setModalVisible(false);
       limparForm();
@@ -138,6 +169,9 @@ export default function PessoalScreen({ navigation }) {
         nomeDespesa: nomeDespesa || 'Sem descrição',
         valorDespesa: parseFloat(valorDespesa),
         descDespesa: descDespesa || null,
+        date: dataDespesa,
+        tipoMovimento,
+        categoriaId: categoriaId ? parseInt(categoriaId) : null,
       });
 
       Alert.alert('Sucesso', 'Despesa atualizada!');
@@ -181,7 +215,79 @@ export default function PessoalScreen({ navigation }) {
     setNomeDespesa(despesa.nomeDespesa || '');
     setValorDespesa(despesa.valorDespesa?.toString() || '');
     setDescDespesa(despesa.descDespesa || '');
+    setTipoMovimento(despesa.tipoMovimento || 'GASTO');
+    setCategoriaId(
+      despesa.categoria?.id
+        ? despesa.categoria.id.toString()
+        : despesa.categoriaId
+        ? despesa.categoriaId.toString()
+        : ''
+    );
+    setDataDespesa(
+      despesa.date ? new Date(despesa.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+    );
     setModalEditVisible(true);
+  };
+
+  // ===== Gerenciamento de Categorias =====
+  const adicionarCategoria = async () => {
+    if (!novaCategoria.trim()) {
+      Alert.alert('Atenção', 'Digite o nome da categoria');
+      return;
+    }
+    setSavingCat(true);
+    try {
+      await api.post('/api/cat-desp-pessoal', { nomeCategoria: novaCategoria.trim() });
+      setNovaCategoria('');
+      await carregarDados();
+    } catch (error) {
+      console.error('Erro ao criar categoria:', error);
+      Alert.alert('Erro', 'Não foi possível criar a categoria');
+    } finally {
+      setSavingCat(false);
+    }
+  };
+
+  const salvarEdicaoCategoria = async () => {
+    if (!catEditNome.trim()) {
+      Alert.alert('Atenção', 'Digite o nome da categoria');
+      return;
+    }
+    setSavingCat(true);
+    try {
+      await api.put(`/api/cat-desp-pessoal/${catEditandoId}`, { nomeCategoria: catEditNome.trim() });
+      setCatEditandoId(null);
+      setCatEditNome('');
+      await carregarDados();
+    } catch (error) {
+      console.error('Erro ao atualizar categoria:', error);
+      Alert.alert('Erro', 'Não foi possível atualizar a categoria');
+    } finally {
+      setSavingCat(false);
+    }
+  };
+
+  const excluirCategoria = (cat) => {
+    Alert.alert(
+      'Confirmar Exclusão',
+      `Deseja excluir a categoria "${cat.nomeCategoria}"?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.delete(`/api/cat-desp-pessoal/${cat.id}`);
+              await carregarDados();
+            } catch (error) {
+              console.error('Erro ao excluir categoria:', error);
+              Alert.alert('Erro', 'Não foi possível excluir a categoria');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const limparForm = () => {
@@ -306,6 +412,7 @@ export default function PessoalScreen({ navigation }) {
       <Appbar.Header style={styles.header}>
         <Appbar.BackAction onPress={() => navigation.goBack()} color="#fff" />
         <Appbar.Content title="Despesas Pessoais" titleStyle={styles.headerTitle} />
+        <Appbar.Action icon="tag-multiple" color="#fff" onPress={() => setCatModalVisible(true)} />
       </Appbar.Header>
 
       <View style={styles.content}>
@@ -712,6 +819,48 @@ export default function PessoalScreen({ navigation }) {
               theme={{ colors: { primary: '#2196F3' } }}
             />
 
+            <View style={styles.pickerContainer}>
+              <Text style={styles.pickerLabel}>Tipo</Text>
+              <Picker
+                selectedValue={tipoMovimento}
+                onValueChange={setTipoMovimento}
+                style={styles.picker}
+                dropdownIconColor="#fff"
+              >
+                <Picker.Item label="Gasto" value="GASTO" />
+                <Picker.Item label="Ganho" value="GANHO" />
+              </Picker>
+            </View>
+
+            <View style={styles.pickerContainer}>
+              <Text style={styles.pickerLabel}>Categoria</Text>
+              <Picker
+                selectedValue={categoriaId}
+                onValueChange={setCategoriaId}
+                style={styles.picker}
+                dropdownIconColor="#fff"
+              >
+                <Picker.Item label="Sem categoria" value="" />
+                {categorias.map((cat) => (
+                  <Picker.Item
+                    key={cat.id}
+                    label={cat.nomeCategoria}
+                    value={cat.id.toString()}
+                  />
+                ))}
+              </Picker>
+            </View>
+
+            <TextInput
+              label="Data"
+              value={dataDespesa}
+              onChangeText={setDataDespesa}
+              mode="outlined"
+              placeholder="YYYY-MM-DD"
+              style={styles.input}
+              theme={{ colors: { primary: '#2196F3' } }}
+            />
+
             <View style={styles.modalButtons}>
               <Button
                 mode="outlined"
@@ -734,6 +883,105 @@ export default function PessoalScreen({ navigation }) {
           </ScrollView>
         </Modal>
       </Portal>
+
+      {/* Modal Gerenciar Categorias */}
+      <Portal>
+        <Modal
+          visible={catModalVisible}
+          onDismiss={() => setCatModalVisible(false)}
+          contentContainerStyle={styles.modal}
+        >
+          <ScrollView>
+            <Text style={styles.modalTitle}>Gerenciar Categorias</Text>
+
+            <View style={styles.catAddRow}>
+              <TextInput
+                label="Nova categoria"
+                value={novaCategoria}
+                onChangeText={setNovaCategoria}
+                mode="outlined"
+                style={styles.catAddInput}
+                theme={{ colors: { primary: '#2196F3' } }}
+              />
+              <Button
+                mode="contained"
+                onPress={adicionarCategoria}
+                loading={savingCat}
+                disabled={savingCat}
+                style={styles.saveButton}
+              >
+                Add
+              </Button>
+            </View>
+
+            <Divider style={styles.divider} />
+
+            {categorias.length === 0 ? (
+              <Text style={styles.semDados}>Nenhuma categoria cadastrada</Text>
+            ) : (
+              categorias.map((cat) => (
+                <View key={cat.id} style={styles.catRow}>
+                  {catEditandoId === cat.id ? (
+                    <>
+                      <TextInput
+                        value={catEditNome}
+                        onChangeText={setCatEditNome}
+                        mode="outlined"
+                        dense
+                        style={styles.catEditInput}
+                        theme={{ colors: { primary: '#2196F3' } }}
+                      />
+                      <IconButton
+                        icon="check"
+                        size={20}
+                        iconColor="#4caf50"
+                        onPress={salvarEdicaoCategoria}
+                      />
+                      <IconButton
+                        icon="close"
+                        size={20}
+                        iconColor="#999"
+                        onPress={() => {
+                          setCatEditandoId(null);
+                          setCatEditNome('');
+                        }}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.catNome}>{cat.nomeCategoria}</Text>
+                      <IconButton
+                        icon="pencil"
+                        size={20}
+                        iconColor="#2196F3"
+                        onPress={() => {
+                          setCatEditandoId(cat.id);
+                          setCatEditNome(cat.nomeCategoria);
+                        }}
+                      />
+                      <IconButton
+                        icon="delete"
+                        size={20}
+                        iconColor="#f44336"
+                        onPress={() => excluirCategoria(cat)}
+                      />
+                    </>
+                  )}
+                </View>
+              ))
+            )}
+
+            <Button
+              mode="outlined"
+              onPress={() => setCatModalVisible(false)}
+              style={[styles.modalButton, { marginTop: 16 }]}
+              labelStyle={styles.cancelButtonLabel}
+            >
+              Fechar
+            </Button>
+          </ScrollView>
+        </Modal>
+      </Portal>
     </View>
   );
 }
@@ -742,6 +990,31 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  catAddRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  catAddInput: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
+  },
+  catRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  catNome: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 15,
+  },
+  catEditInput: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
   },
   header: {
     backgroundColor: '#000',

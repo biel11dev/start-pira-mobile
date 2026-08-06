@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+import { View, StyleSheet, ScrollView, RefreshControl, Alert } from 'react-native';
 import {
   Appbar,
   Card,
@@ -9,6 +9,7 @@ import {
   Button,
   ActivityIndicator,
   Divider,
+  Switch,
 } from 'react-native-paper';
 import api from '../services/api';
 
@@ -28,11 +29,20 @@ export default function AuditoriaScreen({ navigation }) {
   const [filtroAcao, setFiltroAcao] = useState('');
   const [filtroUsuario, setFiltroUsuario] = useState('');
   const [filtroDispositivo, setFiltroDispositivo] = useState(''); // dispositivo/origem
+  const [filtroDataInicio, setFiltroDataInicio] = useState('');
+  const [filtroDataFim, setFiltroDataFim] = useState('');
+
+  // Estatísticas e configuração
+  const [stats, setStats] = useState(null);
+  const [configs, setConfigs] = useState([]);
+  const [showConfig, setShowConfig] = useState(false);
 
   useEffect(() => {
     carregarModulos();
     carregarDispositivos();
     carregarRegistros(1);
+    carregarStats();
+    carregarConfigs();
   }, []);
 
   const carregarModulos = async () => {
@@ -55,6 +65,43 @@ export default function AuditoriaScreen({ navigation }) {
     }
   };
 
+  const carregarStats = async () => {
+    try {
+      const params = {};
+      if (filtroDataInicio) params.dataInicio = filtroDataInicio;
+      if (filtroDataFim) params.dataFim = filtroDataFim;
+      const resp = await api.get('/api/auditoria/stats', { params });
+      setStats(resp.data);
+    } catch (error) {
+      console.error('Erro ao carregar estatísticas:', error);
+    }
+  };
+
+  const carregarConfigs = async () => {
+    try {
+      let resp = await api.get('/api/auditoria-config');
+      if (!resp.data || resp.data.length === 0) {
+        await api.post('/api/auditoria-config/init');
+        resp = await api.get('/api/auditoria-config');
+      }
+      setConfigs(resp.data || []);
+    } catch (error) {
+      console.error('Erro ao carregar configurações:', error);
+    }
+  };
+
+  const toggleConfig = async (modulo, ativo) => {
+    try {
+      await api.put(`/api/auditoria-config/${modulo}`, { ativo: !ativo });
+      setConfigs((prev) =>
+        prev.map((c) => (c.modulo === modulo ? { ...c, ativo: !ativo } : c))
+      );
+    } catch (error) {
+      console.error('Erro ao atualizar configuração:', error);
+      Alert.alert('Erro', 'Não foi possível atualizar a configuração');
+    }
+  };
+
   const carregarRegistros = async (pageArg = 1, replace = true) => {
     setLoading(true);
     try {
@@ -63,6 +110,8 @@ export default function AuditoriaScreen({ navigation }) {
       if (filtroAcao) params.acao = filtroAcao;
       if (filtroUsuario) params.userName = filtroUsuario;
       if (filtroDispositivo) params.dispositivo = filtroDispositivo;
+      if (filtroDataInicio) params.dataInicio = filtroDataInicio;
+      if (filtroDataFim) params.dataFim = filtroDataFim;
       const resp = await api.get('/api/auditoria', { params });
       const novos = resp.data.registros || [];
       setRegistros((prev) => (replace ? novos : [...prev, ...novos]));
@@ -78,6 +127,7 @@ export default function AuditoriaScreen({ navigation }) {
 
   const aplicarFiltros = () => {
     carregarRegistros(1);
+    carregarStats();
   };
 
   const limparFiltros = () => {
@@ -85,7 +135,12 @@ export default function AuditoriaScreen({ navigation }) {
     setFiltroAcao('');
     setFiltroUsuario('');
     setFiltroDispositivo('');
-    setTimeout(() => carregarRegistros(1), 0);
+    setFiltroDataInicio('');
+    setFiltroDataFim('');
+    setTimeout(() => {
+      carregarRegistros(1);
+      carregarStats();
+    }, 0);
   };
 
   const formatarData = (iso) => {
@@ -106,6 +161,11 @@ export default function AuditoriaScreen({ navigation }) {
       <Appbar.Header style={styles.header}>
         <Appbar.BackAction onPress={() => navigation.goBack()} color="#fff" />
         <Appbar.Content title="Auditoria" titleStyle={styles.headerTitle} />
+        <Appbar.Action
+          icon={showConfig ? 'cog' : 'cog-outline'}
+          color="#fff"
+          onPress={() => setShowConfig((v) => !v)}
+        />
       </Appbar.Header>
 
       <ScrollView
@@ -176,6 +236,33 @@ export default function AuditoriaScreen({ navigation }) {
               theme={{ colors: { background: '#2a2a2a' } }}
             />
 
+            <View style={styles.dataRow}>
+              <View style={styles.dataCol}>
+                <Text style={styles.filtroLabel}>Data início</Text>
+                <TextInput
+                  value={filtroDataInicio}
+                  onChangeText={setFiltroDataInicio}
+                  mode="outlined"
+                  dense
+                  placeholder="AAAA-MM-DD"
+                  style={styles.input}
+                  theme={{ colors: { background: '#2a2a2a' } }}
+                />
+              </View>
+              <View style={styles.dataCol}>
+                <Text style={styles.filtroLabel}>Data fim</Text>
+                <TextInput
+                  value={filtroDataFim}
+                  onChangeText={setFiltroDataFim}
+                  mode="outlined"
+                  dense
+                  placeholder="AAAA-MM-DD"
+                  style={styles.input}
+                  theme={{ colors: { background: '#2a2a2a' } }}
+                />
+              </View>
+            </View>
+
             <Text style={styles.filtroLabel}>Dispositivo</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={styles.chipRow}>
@@ -210,6 +297,56 @@ export default function AuditoriaScreen({ navigation }) {
             </View>
           </Card.Content>
         </Card>
+
+        {/* ===== Configuração de Auditoria ===== */}
+        {showConfig && (
+          <Card style={styles.filtroCard}>
+            <Card.Content>
+              <Text style={styles.configTitulo}>Configuração de Auditoria</Text>
+              <Text style={styles.configSub}>
+                Ative ou desative o registro de auditoria por módulo.
+              </Text>
+              {configs.length === 0 ? (
+                <ActivityIndicator style={{ marginTop: 12 }} color="#2196F3" />
+              ) : (
+                configs.map((c) => (
+                  <View key={c.modulo} style={styles.configRow}>
+                    <Text style={styles.configModulo}>{c.modulo}</Text>
+                    <Switch
+                      value={!!c.ativo}
+                      onValueChange={() => toggleConfig(c.modulo, c.ativo)}
+                      color="#4CAF50"
+                    />
+                  </View>
+                ))
+              )}
+            </Card.Content>
+          </Card>
+        )}
+
+        {/* ===== Estatísticas ===== */}
+        {stats && (
+          <Card style={styles.statsCard}>
+            <Card.Content>
+              <Text style={styles.statsTitulo}>
+                {stats.totalRegistros ?? 0} registro(s) no período
+              </Text>
+              <View style={styles.statsRow}>
+                {['POST', 'PUT', 'DELETE'].map((a) => {
+                  const item = (stats.porAcao || []).find((x) => x.acao === a);
+                  return (
+                    <View key={a} style={styles.statItem}>
+                      <Text style={[styles.statCount, { color: corAcao(a) }]}>
+                        {item ? item.count : 0}
+                      </Text>
+                      <Text style={styles.statLabel}>{a}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </Card.Content>
+          </Card>
+        )}
 
         <Text style={styles.totalTexto}>
           {registros.length} de {total} registro(s)
@@ -268,6 +405,61 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000000',
+  },
+  dataRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  dataCol: {
+    flex: 1,
+  },
+  configTitulo: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  configSub: {
+    color: '#aaa',
+    fontSize: 12,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  configRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  configModulo: {
+    color: '#fff',
+    fontSize: 14,
+    textTransform: 'capitalize',
+  },
+  statsCard: {
+    marginTop: 12,
+    backgroundColor: '#1a1a1a',
+  },
+  statsTitulo: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statCount: {
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+  statLabel: {
+    color: '#aaa',
+    fontSize: 11,
+    marginTop: 2,
   },
   header: {
     backgroundColor: '#1a1a1a',

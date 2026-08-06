@@ -15,12 +15,18 @@ import {
   Portal,
   Modal,
   Menu,
-  Chip,
+  IconButton,
+  Switch,
+  Divider,
 } from 'react-native-paper';
 import api from '../services/api';
 import { formatarValor } from '../utils/format';
+import { useAuth } from '../context/AuthContext';
 
 export default function PontoScreen({ navigation }) {
+  const { user } = useAuth();
+  const isAdmin = user?.permissions?.acessos === true;
+
   const [funcionarios, setFuncionarios] = useState([]);
   const [dadosSemanais, setDadosSemanais] = useState([]);
   const [dadosMensais, setDadosMensais] = useState([]);
@@ -54,6 +60,22 @@ export default function PontoScreen({ navigation }) {
   const [gastosModalLoading, setGastosModalLoading] = useState(false);
   const [gastosModalData, setGastosModalData] = useState(null);
   const [gastosModalTitulo, setGastosModalTitulo] = useState('');
+
+  // Gerenciar Funcionários (somente admin)
+  const [funcModalVisible, setFuncModalVisible] = useState(false);
+  const [funcEditando, setFuncEditando] = useState(null);
+  const [funcForm, setFuncForm] = useState({
+    name: '',
+    position: '',
+    valorHora: '',
+    carga: '8',
+    metaHoras: '',
+    bonificacao: '',
+    contato: '',
+    dataEntrada: '',
+    ativo: true,
+  });
+  const [savingFunc, setSavingFunc] = useState(false);
 
   useEffect(() => {
     carregarFuncionarios();
@@ -98,6 +120,7 @@ export default function PontoScreen({ navigation }) {
           workedHours: calcularHorasTrabalhadas(entry, exit),
           valorHora: func.valorHora || 0,
           pontoId: pontoHoje?.id,
+          falta: pontoHoje?.falta || false,
         };
       });
 
@@ -234,11 +257,11 @@ export default function PontoScreen({ navigation }) {
   // Buscar desconto de vale (Gastos Bar: produtos no vale + vales em dinheiro) do funcionário no período
   const buscarDescontoVale = async (nome, inicio, fim) => {
     try {
-      const res = await api.get(
-        `/api/pdv-gastos-bar/funcionario/${encodeURIComponent(nome)}`,
-        { params: { startDate: inicio.toISOString(), endDate: fim.toISOString() } }
-      );
-      return parseFloat(res.data?.total) || 0;
+      const de = inicio.toISOString().split('T')[0];
+      const ate = fim.toISOString().split('T')[0];
+      const res = await api.get('/api/pdv-gastos-bar/resumo', { params: { de, ate } });
+      const entry = (res.data || []).find((f) => f.funcionario === nome);
+      return parseFloat(entry?.total) || 0;
     } catch (error) {
       console.error('Erro ao buscar gastos bar do funcionário:', error);
       return 0;
@@ -253,14 +276,23 @@ export default function PontoScreen({ navigation }) {
     setGastosModalLoading(true);
     setGastosModalVisible(true);
     try {
-      const res = await api.get(
-        `/api/pdv-gastos-bar/funcionario/${encodeURIComponent(range.nome)}`,
-        { params: { startDate: range.inicio.toISOString(), endDate: range.fim.toISOString() } }
+      const de = range.inicio.toISOString().split('T')[0];
+      const ate = range.fim.toISOString().split('T')[0];
+      const res = await api.get('/api/pdv-gastos-bar/resumo', { params: { de, ate } });
+      const entry = (res.data || []).find((f) => f.funcionario === range.nome);
+      setGastosModalData(
+        entry
+          ? {
+              total: entry.total || 0,
+              totalProdutos: entry.totalProdutos || 0,
+              totalVales: entry.totalDescontos || 0,
+              itens: entry.itens || [],
+            }
+          : { total: 0, totalProdutos: 0, totalVales: 0, itens: [] }
       );
-      setGastosModalData(res.data || { total: 0, itens: [] });
     } catch (error) {
       console.error('Erro ao carregar detalhes dos gastos:', error);
-      setGastosModalData({ total: 0, itens: [] });
+      setGastosModalData({ total: 0, totalProdutos: 0, totalVales: 0, itens: [] });
     } finally {
       setGastosModalLoading(false);
     }
@@ -360,6 +392,124 @@ export default function PontoScreen({ navigation }) {
       console.error('Erro ao atualizar ponto:', error);
       Alert.alert('Erro', 'Não foi possível atualizar o ponto');
     }
+  };
+
+  const marcarFalta = (func) => {
+    Alert.alert(
+      'Marcar Falta',
+      `Confirmar falta de ${func.name} em ${formatarDataComSemana(dataSelecionada)}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.put(`/api/daily-points/falta/${func.id}`, { date: dataSelecionada });
+              Alert.alert('Sucesso', 'Falta registrada com sucesso!');
+              carregarFuncionarios();
+            } catch (error) {
+              console.error('Erro ao marcar falta:', error);
+              Alert.alert('Erro', 'Não foi possível registrar a falta');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // ===================== Gerenciar Funcionários (admin) =====================
+  const abrirNovoFuncionario = () => {
+    setFuncEditando(null);
+    setFuncForm({
+      name: '',
+      position: '',
+      valorHora: '',
+      carga: '8',
+      metaHoras: '',
+      bonificacao: '',
+      contato: '',
+      dataEntrada: '',
+      ativo: true,
+    });
+    setFuncModalVisible(true);
+  };
+
+  const abrirEditarFuncionario = (func) => {
+    setFuncEditando(func);
+    setFuncForm({
+      name: func.name || '',
+      position: func.position || '',
+      valorHora: func.valorHora != null ? String(func.valorHora) : '',
+      carga: func.carga != null ? String(func.carga) : '8',
+      metaHoras: func.metaHoras != null ? String(func.metaHoras) : '',
+      bonificacao: func.bonificacao != null ? String(func.bonificacao) : '',
+      contato: func.contato || '',
+      dataEntrada: func.dataEntrada ? String(func.dataEntrada).split('T')[0] : '',
+      ativo: func.ativo !== false,
+    });
+    setFuncModalVisible(true);
+  };
+
+  const setFuncField = (campo, valor) => {
+    setFuncForm((prev) => ({ ...prev, [campo]: valor }));
+  };
+
+  const salvarFuncionario = async () => {
+    if (!funcForm.name.trim()) {
+      Alert.alert('Atenção', 'Informe o nome do funcionário');
+      return;
+    }
+    const payload = {
+      name: funcForm.name.trim(),
+      position: funcForm.position.trim() || null,
+      carga: parseInt(funcForm.carga) || 8,
+      valorHora: parseFloat(String(funcForm.valorHora).replace(',', '.')) || 0,
+      metaHoras: funcForm.metaHoras ? parseFloat(String(funcForm.metaHoras).replace(',', '.')) : null,
+      bonificacao: funcForm.bonificacao ? parseFloat(String(funcForm.bonificacao).replace(',', '.')) : null,
+      contato: funcForm.contato.trim() || null,
+      dataEntrada: funcForm.dataEntrada || null,
+      ativo: funcForm.ativo,
+    };
+    setSavingFunc(true);
+    try {
+      if (funcEditando) {
+        await api.put(`/api/employees/${funcEditando.id}`, payload);
+      } else {
+        await api.post('/api/employees', payload);
+      }
+      setFuncModalVisible(false);
+      await carregarFuncionarios();
+      Alert.alert('Sucesso', `Funcionário ${funcEditando ? 'atualizado' : 'adicionado'}!`);
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao salvar funcionário');
+    } finally {
+      setSavingFunc(false);
+    }
+  };
+
+  const excluirFuncionario = (func) => {
+    Alert.alert(
+      'Confirmar Exclusão',
+      `Excluir "${func.name}"? Todos os registros de ponto também serão excluídos.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.delete(`/api/daily-points?employeeId=${func.id}`);
+              await api.delete(`/api/employees/${func.id}`);
+              if (funcionarioSelecionadoId === func.id) setFuncionarioSelecionadoId(null);
+              await carregarFuncionarios();
+            } catch (error) {
+              Alert.alert('Erro', error.response?.data?.error || 'Erro ao excluir funcionário');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const gerarHorario = async () => {
@@ -594,6 +744,13 @@ export default function PontoScreen({ navigation }) {
       <Appbar.Header style={styles.header}>
         <Appbar.BackAction onPress={() => navigation.goBack()} color="#fff" />
         <Appbar.Content title="Gerenciamento de Ponto" titleStyle={styles.headerTitle} />
+        {isAdmin && (
+          <Appbar.Action
+            icon="account-group"
+            color="#fff"
+            onPress={() => setFuncModalVisible(true)}
+          />
+        )}
       </Appbar.Header>
 
       <ScrollView style={styles.content}>
@@ -628,7 +785,7 @@ export default function PontoScreen({ navigation }) {
           </Card.Content>
         </Card>
 
-        {abaAtiva === 'daily' && (
+        {abaAtiva === 'daily' && isAdmin && (
           <Button
             mode="contained"
             onPress={gerarHorario}
@@ -728,6 +885,7 @@ export default function PontoScreen({ navigation }) {
                 <Text style={styles.metaText}>Valor/h: R$ {formatarValor(metaAtualSemana.valorHora)}</Text>
               </View>
               {metaAtualSemana.isDefault && <Text style={styles.metaBadge}>(Padrão)</Text>}
+              {isAdmin && (
               <Button
                 mode="contained"
                 onPress={() => {
@@ -758,6 +916,7 @@ export default function PontoScreen({ navigation }) {
               >
                 🎯 Definir Meta da Semana
               </Button>
+              )}
             </Card.Content>
           </Card>
         )}
@@ -788,6 +947,7 @@ export default function PontoScreen({ navigation }) {
                         }}
                         placeholder="--:--"
                         placeholderTextColor="#666"
+                        editable={isAdmin}
                       />
                     </View>
                     
@@ -804,6 +964,7 @@ export default function PontoScreen({ navigation }) {
                         }}
                         placeholder="--:--"
                         placeholderTextColor="#666"
+                        editable={isAdmin}
                       />
                     </View>
                   </View>
@@ -819,14 +980,31 @@ export default function PontoScreen({ navigation }) {
                     </Text>
                   </View>
 
-                  <Button
-                    mode="contained"
-                    onPress={() => atualizarPonto(func.id)}
-                    style={styles.atualizarButton}
-                    icon="check"
-                  >
-                    Atualizar
-                  </Button>
+                  {func.falta && (
+                    <Text style={styles.faltaBadge}>⛔ FALTA REGISTRADA</Text>
+                  )}
+
+                  {isAdmin && (
+                  <View style={styles.acoesPontoRow}>
+                    <Button
+                      mode="contained"
+                      onPress={() => atualizarPonto(func.id)}
+                      style={styles.atualizarButton}
+                      icon="check"
+                    >
+                      Atualizar
+                    </Button>
+                    <Button
+                      mode="outlined"
+                      onPress={() => marcarFalta(func)}
+                      style={styles.faltaButton}
+                      textColor="#F44336"
+                      icon="account-cancel"
+                    >
+                      Falta
+                    </Button>
+                  </View>
+                  )}
                 </Card.Content>
               </Card>
             ))}
@@ -1267,6 +1445,172 @@ export default function PontoScreen({ navigation }) {
             </>
           )}
         </Modal>
+
+        {/* Modal Gerenciar Funcionários (somente admin) */}
+        <Modal
+          visible={funcModalVisible}
+          onDismiss={() => setFuncModalVisible(false)}
+          contentContainerStyle={styles.modalContent}
+        >
+          <Text style={styles.modalTitle}>
+            {funcEditando ? 'Editar Funcionário' : 'Gerenciar Funcionários'}
+          </Text>
+          <ScrollView style={styles.funcScroll}>
+            <Text style={styles.funcFieldLabel}>Nome *</Text>
+            <TextInput
+              style={styles.funcInput}
+              value={funcForm.name}
+              onChangeText={(t) => setFuncField('name', t)}
+              placeholder="Nome do funcionário"
+              placeholderTextColor="#666"
+            />
+
+            <Text style={styles.funcFieldLabel}>Função</Text>
+            <TextInput
+              style={styles.funcInput}
+              value={funcForm.position}
+              onChangeText={(t) => setFuncField('position', t)}
+              placeholder="Ex: Garçom, Cozinheiro"
+              placeholderTextColor="#666"
+            />
+
+            <View style={styles.funcRowDupla}>
+              <View style={styles.funcCol}>
+                <Text style={styles.funcFieldLabel}>Valor/Hora (R$)</Text>
+                <TextInput
+                  style={styles.funcInput}
+                  value={funcForm.valorHora}
+                  onChangeText={(t) => setFuncField('valorHora', t)}
+                  placeholder="0,00"
+                  placeholderTextColor="#666"
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              <View style={styles.funcCol}>
+                <Text style={styles.funcFieldLabel}>Carga diária (h)</Text>
+                <TextInput
+                  style={styles.funcInput}
+                  value={funcForm.carga}
+                  onChangeText={(t) => setFuncField('carga', t)}
+                  placeholder="8"
+                  placeholderTextColor="#666"
+                  keyboardType="number-pad"
+                />
+              </View>
+            </View>
+
+            <View style={styles.funcRowDupla}>
+              <View style={styles.funcCol}>
+                <Text style={styles.funcFieldLabel}>Meta de Horas (semana)</Text>
+                <TextInput
+                  style={styles.funcInput}
+                  value={funcForm.metaHoras}
+                  onChangeText={(t) => setFuncField('metaHoras', t)}
+                  placeholder="0"
+                  placeholderTextColor="#666"
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              <View style={styles.funcCol}>
+                <Text style={styles.funcFieldLabel}>Bonificação (R$)</Text>
+                <TextInput
+                  style={styles.funcInput}
+                  value={funcForm.bonificacao}
+                  onChangeText={(t) => setFuncField('bonificacao', t)}
+                  placeholder="0,00"
+                  placeholderTextColor="#666"
+                  keyboardType="decimal-pad"
+                />
+              </View>
+            </View>
+
+            <Text style={styles.funcFieldLabel}>Contato</Text>
+            <TextInput
+              style={styles.funcInput}
+              value={funcForm.contato}
+              onChangeText={(t) => setFuncField('contato', t)}
+              placeholder="Telefone / e-mail"
+              placeholderTextColor="#666"
+            />
+
+            <Text style={styles.funcFieldLabel}>Data de Entrada (AAAA-MM-DD)</Text>
+            <TextInput
+              style={styles.funcInput}
+              value={funcForm.dataEntrada}
+              onChangeText={(t) => setFuncField('dataEntrada', t)}
+              placeholder="2025-01-31"
+              placeholderTextColor="#666"
+            />
+
+            <View style={styles.funcAtivoRow}>
+              <Text style={styles.funcFieldLabel}>Ativo</Text>
+              <Switch
+                value={funcForm.ativo}
+                onValueChange={(v) => setFuncField('ativo', v)}
+              />
+            </View>
+
+            <View style={styles.funcFormButtons}>
+              {funcEditando && (
+                <Button
+                  mode="outlined"
+                  onPress={abrirNovoFuncionario}
+                  textColor="#2196F3"
+                  style={styles.funcFormButton}
+                >
+                  Novo
+                </Button>
+              )}
+              <Button
+                mode="contained"
+                icon="content-save"
+                onPress={salvarFuncionario}
+                loading={savingFunc}
+                disabled={savingFunc}
+                style={styles.funcFormButton}
+              >
+                {funcEditando ? 'Salvar' : 'Adicionar'}
+              </Button>
+            </View>
+
+            <Divider style={styles.funcDivider} />
+            <Text style={styles.funcListaTitulo}>Funcionários cadastrados</Text>
+            {funcionarios.length === 0 && (
+              <Text style={styles.gastoVazio}>Nenhum funcionário cadastrado.</Text>
+            )}
+            {funcionarios.map((f) => (
+              <View key={f.id} style={styles.funcRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.funcRowNome}>{f.name}</Text>
+                  <Text style={styles.funcRowSub}>
+                    {(f.position || 'N/A')} · R$ {formatarValor(f.valorHora || 0)}/h
+                    {f.ativo === false ? ' · inativo' : ''}
+                  </Text>
+                </View>
+                <IconButton
+                  icon="pencil"
+                  size={20}
+                  iconColor="#2196F3"
+                  onPress={() => abrirEditarFuncionario(f)}
+                />
+                <IconButton
+                  icon="delete"
+                  size={20}
+                  iconColor="#F44336"
+                  onPress={() => excluirFuncionario(f)}
+                />
+              </View>
+            ))}
+          </ScrollView>
+          <Button
+            mode="outlined"
+            onPress={() => setFuncModalVisible(false)}
+            textColor="#fff"
+            style={{ marginTop: 12 }}
+          >
+            Fechar
+          </Button>
+        </Modal>
       </Portal>
     </View>
   );
@@ -1418,7 +1762,23 @@ const styles = StyleSheet.create({
   },
   atualizarButton: {
     backgroundColor: '#2196F3',
+    flex: 1,
+  },
+  acoesPontoRow: {
+    flexDirection: 'row',
+    gap: 8,
     marginTop: 8,
+  },
+  faltaButton: {
+    borderColor: '#F44336',
+    flex: 1,
+  },
+  faltaBadge: {
+    color: '#F44336',
+    fontWeight: 'bold',
+    fontSize: 13,
+    marginTop: 8,
+    textAlign: 'center',
   },
   resumoCard: {
     backgroundColor: '#4caf50',
@@ -1536,6 +1896,69 @@ const styles = StyleSheet.create({
     padding: 24,
     margin: 20,
     borderRadius: 8,
+  },
+  funcScroll: {
+    maxHeight: 460,
+  },
+  funcFieldLabel: {
+    color: '#bbb',
+    fontSize: 13,
+    marginBottom: 4,
+    marginTop: 8,
+  },
+  funcInput: {
+    backgroundColor: '#2a2a2a',
+    color: '#fff',
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 15,
+  },
+  funcRowDupla: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  funcCol: {
+    flex: 1,
+  },
+  funcAtivoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+  },
+  funcFormButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 16,
+  },
+  funcFormButton: {
+    flex: 1,
+  },
+  funcDivider: {
+    backgroundColor: '#333',
+    marginVertical: 16,
+  },
+  funcListaTitulo: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  funcRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 2,
+  },
+  funcRowNome: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  funcRowSub: {
+    color: '#888',
+    fontSize: 12,
   },
   modalTitle: {
     color: '#2196F3',

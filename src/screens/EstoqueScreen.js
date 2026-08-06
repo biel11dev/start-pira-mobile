@@ -24,8 +24,10 @@ import {
 } from 'react-native-paper';
 import api from '../services/api';
 import { formatarValor } from '../utils/format';
+import { useAuth } from '../context/AuthContext';
 
 export default function EstoqueScreen({ navigation }) {
+  const { user } = useAuth();
   const [estoque, setEstoque] = useState([]);
   const [minimoMap, setMinimoMap] = useState({}); // estoqueId -> quantidadeMinima
   const [catalogo, setCatalogo] = useState([]); // /api/products
@@ -49,10 +51,25 @@ export default function EstoqueScreen({ navigation }) {
   // Conversão manual
   const [convVisible, setConvVisible] = useState(false);
   const [convItem, setConvItem] = useState(null);
-  const [convModo, setConvModo] = useState('base'); // 'base' | 'empacotar'
+  const [convModo, setConvModo] = useState('base'); // 'base' | 'empacotar' | 'dose'
   const [convQuantidade, setConvQuantidade] = useState('');
   const [convUnidadeAlvo, setConvUnidadeAlvo] = useState('');
+  const [convDoseUnidade, setConvDoseUnidade] = useState('');
+  const [convDoseRendimento, setConvDoseRendimento] = useState('');
+  const [convDoseValor, setConvDoseValor] = useState('');
   const [savingConv, setSavingConv] = useState(false);
+
+  // Editar item de estoque
+  const [editVisible, setEditVisible] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const [editForm, setEditForm] = useState({ name: '', quantity: '', unit: '', value: '', valuecusto: '' });
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // Excluir item de estoque (com senha)
+  const [deleteVisible, setDeleteVisible] = useState(false);
+  const [deleteItem, setDeleteItem] = useState(null);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Componente (composição)
   const [compVisible, setCompVisible] = useState(false);
@@ -167,6 +184,9 @@ export default function EstoqueScreen({ navigation }) {
     setConvModo('base');
     setConvQuantidade('');
     setConvUnidadeAlvo('');
+    setConvDoseUnidade('');
+    setConvDoseRendimento('');
+    setConvDoseValor('');
     setConvVisible(true);
   };
 
@@ -182,7 +202,7 @@ export default function EstoqueScreen({ navigation }) {
           estoqueId: convItem.id,
           quantityToConvert: parseInt(convQuantidade, 10),
         });
-      } else {
+      } else if (convModo === 'empacotar') {
         if (!convUnidadeAlvo) {
           Alert.alert('Atenção', 'Informe a unidade de destino (ex: fardo, caixa).');
           setSavingConv(false);
@@ -193,6 +213,21 @@ export default function EstoqueScreen({ navigation }) {
           targetUnit: convUnidadeAlvo,
           quantityPacked: parseInt(convQuantidade, 10),
         });
+      } else {
+        // Porção / Dose (ex: 1 Garrafa -> 9 Doses)
+        if (!convDoseUnidade.trim() || !convDoseRendimento || parseFloat(convDoseRendimento) <= 0) {
+          Alert.alert('Atenção', 'Informe a unidade de destino e o rendimento por unidade.');
+          setSavingConv(false);
+          return;
+        }
+        await api.post('/api/estoque_prod/converter-dose', {
+          estoqueId: convItem.id,
+          quantityToConvert: parseInt(convQuantidade, 10),
+          targetUnit: convDoseUnidade.trim(),
+          yieldPerUnit: parseFloat(convDoseRendimento),
+          targetValue: convDoseValor ? parseFloat(convDoseValor) : null,
+          targetValueCusto: null,
+        });
       }
       Alert.alert('Sucesso', 'Conversão realizada!');
       setConvVisible(false);
@@ -201,6 +236,75 @@ export default function EstoqueScreen({ navigation }) {
       Alert.alert('Erro', error.response?.data?.error || 'Erro na conversão');
     } finally {
       setSavingConv(false);
+    }
+  };
+
+  // ===== Editar item de estoque =====
+  const abrirEdicao = (item) => {
+    setEditItem(item);
+    setEditForm({
+      name: item.name || '',
+      quantity: String(item.quantity ?? ''),
+      unit: item.unit || '',
+      value: item.value != null ? String(item.value) : '',
+      valuecusto: item.valuecusto != null ? String(item.valuecusto) : '',
+    });
+    setEditVisible(true);
+  };
+
+  const salvarEdicao = async () => {
+    if (!editItem || !editForm.name.trim()) {
+      Alert.alert('Atenção', 'Informe o nome do item.');
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      await api.put(`/api/estoque_prod/${editItem.id}`, {
+        name: editForm.name.trim(),
+        quantity: parseInt(editForm.quantity, 10) || 0,
+        unit: editForm.unit || 'un',
+        value: parseFloat(editForm.value) || 0,
+        valuecusto: parseFloat(editForm.valuecusto) || 0,
+        categoryId: editItem.categoryId ?? editItem.category?.id ?? null,
+        contabiliza: editItem.contabiliza ?? true,
+      });
+      Alert.alert('Sucesso', 'Item atualizado!');
+      setEditVisible(false);
+      carregarTudo();
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao atualizar item');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  // ===== Excluir item de estoque (com senha) =====
+  const abrirExclusao = (item) => {
+    setDeleteItem(item);
+    setDeletePassword('');
+    setDeleteVisible(true);
+  };
+
+  const confirmarExclusao = async () => {
+    if (!deleteItem) return;
+    if (!deletePassword) {
+      Alert.alert('Atenção', 'Informe sua senha para confirmar.');
+      return;
+    }
+    setDeleteLoading(true);
+    try {
+      await api.post('/api/verify-password', {
+        username: user?.username,
+        password: deletePassword,
+      });
+      await api.delete(`/api/estoque_prod/${deleteItem.id}`);
+      Alert.alert('Sucesso', 'Item excluído!');
+      setDeleteVisible(false);
+      carregarTudo();
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Senha incorreta ou erro ao excluir');
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -405,6 +509,24 @@ export default function EstoqueScreen({ navigation }) {
                           >
                             Componente
                           </Button>
+                          <Button
+                            compact
+                            mode="text"
+                            icon="pencil"
+                            textColor="#90caf9"
+                            onPress={() => abrirEdicao(produto)}
+                          >
+                            Editar
+                          </Button>
+                          <Button
+                            compact
+                            mode="text"
+                            icon="delete"
+                            textColor="#F44336"
+                            onPress={() => abrirExclusao(produto)}
+                          >
+                            Excluir
+                          </Button>
                         </View>
                       </Card.Content>
                     </Card>
@@ -592,10 +714,17 @@ export default function EstoqueScreen({ navigation }) {
               buttons={[
                 { value: 'base', label: 'Desmembrar' },
                 { value: 'empacotar', label: 'Empacotar' },
+                { value: 'dose', label: 'Porção' },
               ]}
             />
             <TextInput
-              label={convModo === 'base' ? 'Qtd. a desmembrar' : 'Qtd. de pacotes'}
+              label={
+                convModo === 'empacotar'
+                  ? 'Qtd. de pacotes'
+                  : convModo === 'base'
+                  ? 'Qtd. a desmembrar'
+                  : 'Qtd. de unidades a converter'
+              }
               value={convQuantidade}
               onChangeText={setConvQuantidade}
               mode="outlined"
@@ -613,10 +742,42 @@ export default function EstoqueScreen({ navigation }) {
                 theme={{ colors: { background: '#2a2a2a' } }}
               />
             )}
+            {convModo === 'dose' && (
+              <>
+                <TextInput
+                  label="Unidade de destino (Dose, Taça...)"
+                  value={convDoseUnidade}
+                  onChangeText={setConvDoseUnidade}
+                  mode="outlined"
+                  style={styles.input}
+                  theme={{ colors: { background: '#2a2a2a' } }}
+                />
+                <TextInput
+                  label="Rendimento por unidade (ex: 9)"
+                  value={convDoseRendimento}
+                  onChangeText={setConvDoseRendimento}
+                  mode="outlined"
+                  keyboardType="decimal-pad"
+                  style={styles.input}
+                  theme={{ colors: { background: '#2a2a2a' } }}
+                />
+                <TextInput
+                  label="Preço de venda da porção (opcional)"
+                  value={convDoseValor}
+                  onChangeText={setConvDoseValor}
+                  mode="outlined"
+                  keyboardType="decimal-pad"
+                  style={styles.input}
+                  theme={{ colors: { background: '#2a2a2a' } }}
+                />
+              </>
+            )}
             <Text style={styles.dica}>
               {convModo === 'base'
                 ? 'Transforma pacotes/fardos em unidades base.'
-                : 'Agrupa unidades base em pacotes/fardos.'}
+                : convModo === 'empacotar'
+                ? 'Agrupa unidades base em pacotes/fardos.'
+                : 'Transforma 1 unidade em várias porções (ex: 1 Garrafa → 9 Doses).'}
             </Text>
             <View style={styles.modalButtons}>
               <Button
@@ -751,6 +912,124 @@ export default function EstoqueScreen({ navigation }) {
             >
               Fechar
             </Button>
+          </ScrollView>
+        </Modal>
+
+        {/* ===== Modal: Editar item ===== */}
+        <Modal
+          visible={editVisible}
+          onDismiss={() => setEditVisible(false)}
+          contentContainerStyle={styles.modal}
+        >
+          <ScrollView>
+            <Text style={styles.modalTitle}>Editar Item</Text>
+            <TextInput
+              label="Nome"
+              value={editForm.name}
+              onChangeText={(t) => setEditForm({ ...editForm, name: t })}
+              mode="outlined"
+              style={styles.input}
+              theme={{ colors: { background: '#2a2a2a' } }}
+            />
+            <TextInput
+              label="Quantidade"
+              value={editForm.quantity}
+              onChangeText={(t) => setEditForm({ ...editForm, quantity: t })}
+              mode="outlined"
+              keyboardType="number-pad"
+              style={styles.input}
+              theme={{ colors: { background: '#2a2a2a' } }}
+            />
+            <TextInput
+              label="Unidade"
+              value={editForm.unit}
+              onChangeText={(t) => setEditForm({ ...editForm, unit: t })}
+              mode="outlined"
+              style={styles.input}
+              theme={{ colors: { background: '#2a2a2a' } }}
+            />
+            <TextInput
+              label="Preço de venda"
+              value={editForm.value}
+              onChangeText={(t) => setEditForm({ ...editForm, value: t })}
+              mode="outlined"
+              keyboardType="decimal-pad"
+              style={styles.input}
+              theme={{ colors: { background: '#2a2a2a' } }}
+            />
+            <TextInput
+              label="Preço de custo"
+              value={editForm.valuecusto}
+              onChangeText={(t) => setEditForm({ ...editForm, valuecusto: t })}
+              mode="outlined"
+              keyboardType="decimal-pad"
+              style={styles.input}
+              theme={{ colors: { background: '#2a2a2a' } }}
+            />
+            <View style={styles.modalButtons}>
+              <Button
+                mode="outlined"
+                onPress={() => setEditVisible(false)}
+                style={styles.modalButton}
+                textColor="#fff"
+              >
+                Cancelar
+              </Button>
+              <Button
+                mode="contained"
+                onPress={salvarEdicao}
+                loading={savingEdit}
+                disabled={savingEdit}
+                style={styles.modalButton}
+              >
+                Salvar
+              </Button>
+            </View>
+          </ScrollView>
+        </Modal>
+
+        {/* ===== Modal: Excluir item (senha) ===== */}
+        <Modal
+          visible={deleteVisible}
+          onDismiss={() => setDeleteVisible(false)}
+          contentContainerStyle={styles.modal}
+        >
+          <ScrollView>
+            <Text style={styles.modalTitle}>Excluir Item</Text>
+            {deleteItem && (
+              <Text style={styles.dica}>
+                Confirme sua senha para excluir "{deleteItem.name}". Esta ação não pode ser desfeita.
+              </Text>
+            )}
+            <TextInput
+              label="Sua senha"
+              value={deletePassword}
+              onChangeText={setDeletePassword}
+              mode="outlined"
+              secureTextEntry
+              style={styles.input}
+              theme={{ colors: { background: '#2a2a2a' } }}
+            />
+            <View style={styles.modalButtons}>
+              <Button
+                mode="outlined"
+                onPress={() => setDeleteVisible(false)}
+                style={styles.modalButton}
+                textColor="#fff"
+              >
+                Cancelar
+              </Button>
+              <Button
+                mode="contained"
+                buttonColor="#F44336"
+                onPress={confirmarExclusao}
+                loading={deleteLoading}
+                disabled={deleteLoading}
+                style={styles.modalButton}
+              >
+                Excluir
+              </Button>
+            </View>
           </ScrollView>
         </Modal>
       </Portal>

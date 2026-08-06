@@ -273,7 +273,10 @@ export default function CashRegisterScreen({ navigation }) {
       Alert.alert('Sucesso', 'Registro atualizado!');
       carregarRegistros();
     } catch (error) {
-      Alert.alert('Erro', 'Erro ao atualizar registro');
+      const msg = error.response?.status === 409
+        ? (error.response?.data?.error || 'Este registro está vinculado a um caixa fechado.')
+        : 'Erro ao atualizar registro';
+      Alert.alert('Erro', msg);
     }
   };
 
@@ -302,7 +305,10 @@ export default function CashRegisterScreen({ navigation }) {
               Alert.alert('Sucesso', 'Registro excluído!');
               carregarRegistros();
             } catch (error) {
-              Alert.alert('Erro', 'Erro ao excluir registro');
+              const msg = error.response?.status === 409
+                ? (error.response?.data?.error || 'Este registro está vinculado a um caixa fechado.')
+                : 'Erro ao excluir registro';
+              Alert.alert('Erro', msg);
             }
           }
         }
@@ -330,7 +336,9 @@ export default function CashRegisterScreen({ navigation }) {
   };
 
   const calcularLucroTotal = () => {
-    return registros.reduce((acc, r) => acc + (r.balance || 0), 0);
+    const totalLucro = registros.reduce((acc, r) => acc + (r.lucro || 0), 0);
+    const maquina = parseFloat(valorMaquinaSemana[semanaAtual - 1]) || 0;
+    return totalLucro + maquina;
   };
 
   const mudarData = (dias) => {
@@ -389,12 +397,9 @@ export default function CashRegisterScreen({ navigation }) {
       });
       
       const totalSaldoInicial = registrosSemana.reduce((acc, r) => acc + (r.balance || 0), 0);
-      const totalLucro = registrosSemana.reduce((acc, r) => {
-        const lucro = ((r.cartao || 0) + (r.dinheiro || 0)) - (r.balance || 0);
-        return acc + lucro;
-      }, 0);
+      const totalLucro = registrosSemana.reduce((acc, r) => acc + (r.lucro || 0), 0);
       const totalSaldoFinal = registrosSemana.reduce((acc, r) => {
-        const saldoFinal = (r.cartao || 0) + (r.dinheiro || 0);
+        const saldoFinal = (r.cartaofimcaixa || 0) + (r.dinheirofimcaixa || 0);
         return acc + saldoFinal;
       }, 0);
       const valorMaquina = valorMaquinaSemana[index] || 0;
@@ -501,7 +506,7 @@ export default function CashRegisterScreen({ navigation }) {
           </Card.Content>
         </Card>
 
-        {/* Registrar Vale / Sangria
+        {/* Registrar Vale / Sangria */}
         <Card style={styles.formCard}>
           <Card.Title
             title="Registrar Vale / Sangria"
@@ -573,7 +578,7 @@ export default function CashRegisterScreen({ navigation }) {
               Registrar Vale
             </Button>
           </Card.Content>
-        </Card> */}
+        </Card>
 
         {/* Navegação de Mês */}
         <View style={styles.monthNav}>
@@ -688,7 +693,14 @@ export default function CashRegisterScreen({ navigation }) {
                             />
                           </View>
                         </View>
-                        
+
+                        {registro.lucro != null && (
+                          <View style={styles.registroLucroRow}>
+                            <Text style={styles.registroLucroLabel}>Lucro do dia:</Text>
+                            <Text style={styles.registroLucroValor}>R$ {formatarValor(registro.lucro || 0)}</Text>
+                          </View>
+                        )}
+
                         <View style={styles.registroActions}>
                           <Button
                             mode="contained"
@@ -783,15 +795,15 @@ export default function CashRegisterScreen({ navigation }) {
                             <Text style={styles.registroMensalData}>
                               {formatarData(registro.date)}:
                               <Text style={styles.registroMensalValor}>
-                                R$ {formatarValor((registro.cartao || 0) + (registro.dinheiro || 0))}
+                                R$ {formatarValor((registro.cartaofimcaixa || 0) + (registro.dinheirofimcaixa || 0))}
                               </Text>
                             </Text>
                             <View style={styles.registroMensalDetalhes}>
                               <Text style={styles.detalhesText}>
-                                Valor Final Dinheiro: {registro.dinheiro || 0}
+                                Valor Final Dinheiro: {registro.dinheirofimcaixa || 0}
                               </Text>
                               <Text style={styles.detalhesText}>
-                                Valor Final Cartão: {registro.cartao || 0}
+                                Valor Final Cartão: {registro.cartaofimcaixa || 0}
                               </Text>
                             </View>
                           </View>
@@ -990,6 +1002,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 8,
+  },
+  registroLucroRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+  },
+  registroLucroLabel: {
+    color: '#aaa',
+    fontSize: 13,
+  },
+  registroLucroValor: {
+    color: '#4CAF50',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   actionButton: {
     flex: 1,

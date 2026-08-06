@@ -16,6 +16,8 @@ import {
   Modal,
   Searchbar,
   Chip,
+  IconButton,
+  Divider,
 } from 'react-native-paper';
 import api from '../services/api';
 import { formatarValor } from '../utils/format';
@@ -31,34 +33,78 @@ export default function ProductListScreen({ navigation }) {
   // Form fields
   const [nomeProduto, setNomeProduto] = useState('');
   const [preco, setPreco] = useState('');
-  const [estoque, setEstoque] = useState('');
-  const [descricao, setDescricao] = useState('');
-  const [codigoBarras, setCodigoBarras] = useState('');
+  const [precoCusto, setPrecoCusto] = useState('');
+  const [selectedCategoryId, setSelectedCategoryId] = useState(null);
+
+  // Categorias
+  const [categorias, setCategorias] = useState([]);
 
   // Configuração de PDV do produto selecionado
   const [baseUnitEdit, setBaseUnitEdit] = useState(null);
   const [hiddenUnitsEdit, setHiddenUnitsEdit] = useState([]);
   const [savingConfig, setSavingConfig] = useState(false);
 
+  // Edição do produto (no modal de detalhes)
+  const [editNome, setEditNome] = useState('');
+  const [editValue, setEditValue] = useState('');
+  const [editValueCusto, setEditValueCusto] = useState('');
+  const [editCategoryId, setEditCategoryId] = useState(null);
+  const [deletingProduto, setDeletingProduto] = useState(false);
+
+  // Gerenciar Categorias
+  const [catModalVisible, setCatModalVisible] = useState(false);
+  const [novaCategoria, setNovaCategoria] = useState('');
+  const [novaCatParentId, setNovaCatParentId] = useState(null);
+  const [savingCat, setSavingCat] = useState(false);
+
+  // Gerenciar Unidades (equivalências)
+  const [unidModalVisible, setUnidModalVisible] = useState(false);
+  const [unidades, setUnidades] = useState([]);
+  const [unitNome, setUnitNome] = useState('');
+  const [unitTipo, setUnitTipo] = useState('empacotada'); // 'empacotada' | 'porcao'
+  const [unitValor, setUnitValor] = useState('');
+  const [unitFracionado, setUnitFracionado] = useState('');
+  const [unitEditando, setUnitEditando] = useState(null);
+  const [savingUnit, setSavingUnit] = useState(false);
+
   useEffect(() => {
     carregarProdutos();
+    carregarCategorias();
   }, []);
 
   const carregarProdutos = async () => {
     try {
-      console.log('🔵 Carregando produtos...');
       const response = await api.get('/api/products');
-      console.log('✅ Produtos carregados:', response.data);
-      console.log('📊 Total de produtos:', response.data?.length);
       setProdutos(response.data || []);
     } catch (error) {
       console.error('❌ Erro ao carregar produtos:', error);
     }
   };
 
+  const carregarCategorias = async () => {
+    try {
+      const response = await api.get('/api/categories');
+      setCategorias(response.data || []);
+    } catch (error) {
+      console.error('❌ Erro ao carregar categorias:', error);
+    }
+  };
+
+  // Achata categorias (pai + subcategorias) para seleção
+  const categoriasFlat = () => {
+    const out = [];
+    categorias.forEach((c) => {
+      out.push({ id: c.id, name: c.name });
+      (c.subcategories || []).forEach((s) =>
+        out.push({ id: s.id, name: `${c.name} > ${s.name}` })
+      );
+    });
+    return out;
+  };
+
   const adicionarProduto = async () => {
-    if (!nomeProduto || !preco) {
-      Alert.alert('Atenção', 'Preencha os campos obrigatórios');
+    if (!nomeProduto || !preco || !precoCusto) {
+      Alert.alert('Atenção', 'Preencha nome, preço de venda e preço de custo');
       return;
     }
 
@@ -66,11 +112,11 @@ export default function ProductListScreen({ navigation }) {
     try {
       await api.post('/api/products', {
         name: nomeProduto,
-        value: parseFloat(preco),
-        valuecusto: parseFloat(preco) * 0.7, // custo estimado
-        quantity: estoque ? parseInt(estoque) : 0,
         unit: 'un',
-        categoryId: null,
+        value: parseFloat(preco),
+        valuecusto: parseFloat(precoCusto),
+        categoryId: selectedCategoryId,
+        baseUnit: null,
       });
 
       Alert.alert('Sucesso', 'Produto cadastrado!');
@@ -78,25 +124,9 @@ export default function ProductListScreen({ navigation }) {
       limparForm();
       carregarProdutos();
     } catch (error) {
-      Alert.alert('Erro', 'Erro ao cadastrar produto');
-      console.error(error);
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao cadastrar produto');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const atualizarEstoque = async (produtoId, quantidade, tipo) => {
-    try {
-      await api.put(`/api/produtos/${produtoId}/estoque`, {
-        quantidade: parseInt(quantidade),
-        tipo, // 'adicionar' ou 'remover'
-        data: new Date().toISOString(),
-      });
-      Alert.alert('Sucesso', 'Estoque atualizado!');
-      carregarProdutos();
-      setModalDetalhes(false);
-    } catch (error) {
-      Alert.alert('Erro', 'Erro ao atualizar estoque');
     }
   };
 
@@ -104,6 +134,10 @@ export default function ProductListScreen({ navigation }) {
     setProdutoSelecionado(produto);
     setBaseUnitEdit(produto.baseUnit || null);
     setHiddenUnitsEdit(Array.isArray(produto.pdvHiddenUnits) ? produto.pdvHiddenUnits : []);
+    setEditNome(produto.name || '');
+    setEditValue(produto.value != null ? String(produto.value) : '');
+    setEditValueCusto(produto.valuecusto != null ? String(produto.valuecusto) : '');
+    setEditCategoryId(produto.categoryId ?? produto.category?.id ?? null);
     setModalDetalhes(true);
   };
 
@@ -123,39 +157,206 @@ export default function ProductListScreen({ navigation }) {
 
   const salvarConfigPdv = async () => {
     if (!produtoSelecionado) return;
+    if (!editNome.trim()) {
+      Alert.alert('Atenção', 'Informe o nome do produto.');
+      return;
+    }
     setSavingConfig(true);
     try {
       await api.put(`/api/products/${produtoSelecionado.id}`, {
-        name: produtoSelecionado.name,
+        name: editNome.trim(),
         quantity: produtoSelecionado.quantity ?? 0,
         unit: produtoSelecionado.unit,
-        value: produtoSelecionado.value,
-        valuecusto: produtoSelecionado.valuecusto,
-        categoryId: produtoSelecionado.categoryId || null,
+        value: parseFloat(editValue) || 0,
+        valuecusto: parseFloat(editValueCusto) || 0,
+        categoryId: editCategoryId || null,
         baseUnit: baseUnitEdit || null,
         pdvHiddenUnits: hiddenUnitsEdit,
       });
-      Alert.alert('Sucesso', 'Configuração do PDV salva!');
+      Alert.alert('Sucesso', 'Produto atualizado!');
       setModalDetalhes(false);
       carregarProdutos();
     } catch (error) {
-      const msg = error.response?.data?.error || 'Erro ao salvar configuração';
+      const msg = error.response?.data?.error || 'Erro ao salvar produto';
       Alert.alert('Erro', msg);
     } finally {
       setSavingConfig(false);
     }
   };
 
+  const excluirProduto = () => {
+    if (!produtoSelecionado) return;
+    Alert.alert(
+      'Confirmar Exclusão',
+      `Deseja realmente excluir o produto "${produtoSelecionado.name}"?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: async () => {
+            setDeletingProduto(true);
+            try {
+              await api.delete(`/api/products/${produtoSelecionado.id}`);
+              setModalDetalhes(false);
+              carregarProdutos();
+            } catch (error) {
+              Alert.alert('Erro', error.response?.data?.error || 'Erro ao excluir produto');
+            } finally {
+              setDeletingProduto(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const limparForm = () => {
     setNomeProduto('');
     setPreco('');
-    setEstoque('');
-    setDescricao('');
-    setCodigoBarras('');
+    setPrecoCusto('');
+    setSelectedCategoryId(null);
   };
 
-  const produtosFiltrados = produtos.filter(
-    (p) =>
+  // ===================== Categorias =====================
+  const adicionarCategoria = async () => {
+    if (!novaCategoria.trim()) {
+      Alert.alert('Atenção', 'Digite o nome da categoria');
+      return;
+    }
+    setSavingCat(true);
+    try {
+      await api.post('/api/categories', {
+        name: novaCategoria.trim(),
+        parentId: novaCatParentId || null,
+      });
+      setNovaCategoria('');
+      setNovaCatParentId(null);
+      await carregarCategorias();
+      Alert.alert('Sucesso', 'Categoria adicionada!');
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao adicionar categoria');
+    } finally {
+      setSavingCat(false);
+    }
+  };
+
+  const excluirCategoria = (cat) => {
+    Alert.alert('Confirmar Exclusão', `Excluir a categoria "${cat.name}"?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Excluir',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.delete(`/api/categories/${cat.id}`);
+            await carregarCategorias();
+          } catch (error) {
+            Alert.alert('Erro', error.response?.data?.error || 'Erro ao excluir categoria');
+          }
+        },
+      },
+    ]);
+  };
+
+  // ===================== Unidades (equivalências) =====================
+  const carregarUnidades = async () => {
+    try {
+      const res = await api.get('/api/unit-equivalences');
+      setUnidades(res.data || []);
+    } catch (error) {
+      console.error('❌ Erro ao carregar unidades:', error);
+    }
+  };
+
+  const abrirUnidades = () => {
+    limparUnitForm();
+    carregarUnidades();
+    setUnidModalVisible(true);
+  };
+
+  const limparUnitForm = () => {
+    setUnitEditando(null);
+    setUnitNome('');
+    setUnitTipo('empacotada');
+    setUnitValor('');
+    setUnitFracionado('');
+  };
+
+  const editarUnidade = (u) => {
+    setUnitEditando(u.unitName);
+    if (u.isFractional) {
+      setUnitTipo('porcao');
+      setUnitFracionado(u.fractionalValue != null ? String(u.fractionalValue) : '');
+      setUnitValor('');
+    } else {
+      setUnitTipo('empacotada');
+      setUnitValor(u.value != null ? String(u.value) : '');
+      setUnitFracionado('');
+    }
+  };
+
+  const salvarUnidade = async () => {
+    const nome = (unitEditando || unitNome).trim();
+    if (!nome) {
+      Alert.alert('Atenção', 'Digite o nome da unidade');
+      return;
+    }
+    const isPorcao = unitTipo === 'porcao';
+    const valorNum = parseFloat(unitValor);
+    const fracNum = parseFloat(unitFracionado);
+    if (!isPorcao && (unitValor.trim() === '' || isNaN(valorNum) || valorNum <= 0)) {
+      Alert.alert('Atenção', 'Digite um número válido maior que zero!');
+      return;
+    }
+    if (isPorcao && (unitFracionado.trim() === '' || isNaN(fracNum) || fracNum <= 0)) {
+      Alert.alert('Atenção', 'Informe um valor maior que zero para a equivalência (ex: 0,5 para meia unidade ou 9 para 1 Garrafa → 9 Doses)!');
+      return;
+    }
+    const payload = isPorcao
+      ? { isFractional: true, fractionalValue: fracNum }
+      : { value: valorNum, isFractional: false };
+    setSavingUnit(true);
+    try {
+      if (unitEditando) {
+        await api.put(`/api/unit-equivalences/${encodeURIComponent(unitEditando)}`, payload);
+      } else {
+        await api.post('/api/unit-equivalences', { unitName: nome, ...payload });
+      }
+      limparUnitForm();
+      await carregarUnidades();
+      Alert.alert('Sucesso', `Equivalência ${unitEditando ? 'atualizada' : 'definida'}!`);
+    } catch (error) {
+      const msg =
+        error.response?.status === 409
+          ? 'Esta unidade já possui equivalência definida!'
+          : error.response?.data?.error || 'Erro ao salvar equivalência';
+      Alert.alert('Erro', msg);
+    } finally {
+      setSavingUnit(false);
+    }
+  };
+
+  const excluirUnidade = (unitName) => {
+    Alert.alert('Confirmar Exclusão', `Excluir a unidade "${unitName}"?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Excluir',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.delete(`/api/unit-equivalences/${encodeURIComponent(unitName)}`);
+            if (unitEditando === unitName) limparUnitForm();
+            await carregarUnidades();
+          } catch (error) {
+            Alert.alert('Erro', error.response?.data?.error || 'Erro ao excluir unidade');
+          }
+        },
+      },
+    ]);
+  };
+
+  const produtosFiltrados = produtos.filter(    (p) =>
       p.name?.toLowerCase().includes(busca.toLowerCase()) ||
       p.id?.toString().includes(busca)
   );
@@ -165,6 +366,8 @@ export default function ProductListScreen({ navigation }) {
       <Appbar.Header>
         <Appbar.BackAction onPress={() => navigation.goBack()} />
         <Appbar.Content title="Produtos" />
+        <Appbar.Action icon="tag-multiple" onPress={() => setCatModalVisible(true)} />
+        <Appbar.Action icon="scale-balance" onPress={abrirUnidades} />
       </Appbar.Header>
 
       <View style={styles.content}>
@@ -245,7 +448,7 @@ export default function ProductListScreen({ navigation }) {
             />
 
             <TextInput
-              label="Preço *"
+              label="Preço de Venda *"
               value={preco}
               onChangeText={setPreco}
               mode="outlined"
@@ -254,31 +457,34 @@ export default function ProductListScreen({ navigation }) {
             />
 
             <TextInput
-              label="Estoque Inicial"
-              value={estoque}
-              onChangeText={setEstoque}
+              label="Preço de Custo *"
+              value={precoCusto}
+              onChangeText={setPrecoCusto}
               mode="outlined"
-              keyboardType="number-pad"
+              keyboardType="decimal-pad"
               style={styles.input}
             />
 
-            <TextInput
-              label="Código de Barras"
-              value={codigoBarras}
-              onChangeText={setCodigoBarras}
-              mode="outlined"
-              style={styles.input}
-            />
-
-            <TextInput
-              label="Descrição"
-              value={descricao}
-              onChangeText={setDescricao}
-              mode="outlined"
-              multiline
-              numberOfLines={3}
-              style={styles.input}
-            />
+            <Text style={styles.configLabel}>Categoria:</Text>
+            <View style={styles.configChips}>
+              <Chip
+                selected={!selectedCategoryId}
+                onPress={() => setSelectedCategoryId(null)}
+                style={styles.configChip}
+              >
+                Sem categoria
+              </Chip>
+              {categoriasFlat().map((c) => (
+                <Chip
+                  key={c.id}
+                  selected={selectedCategoryId === c.id}
+                  onPress={() => setSelectedCategoryId(c.id)}
+                  style={styles.configChip}
+                >
+                  {c.name}
+                </Chip>
+              ))}
+            </View>
 
             <View style={styles.modalButtons}>
               <Button
@@ -311,20 +517,6 @@ export default function ProductListScreen({ navigation }) {
               <Text style={styles.modalTitle}>{produtoSelecionado.name}</Text>
 
               <View style={styles.detalheItem}>
-                <Text style={styles.detalheLabel}>Preço Venda:</Text>
-                <Text style={styles.detalheValor}>
-                  R$ {formatarValor(produtoSelecionado.value)}
-                </Text>
-              </View>
-
-              <View style={styles.detalheItem}>
-                <Text style={styles.detalheLabel}>Preço Custo:</Text>
-                <Text style={styles.detalheValor}>
-                  R$ {formatarValor(produtoSelecionado.valuecusto)}
-                </Text>
-              </View>
-
-              <View style={styles.detalheItem}>
                 <Text style={styles.detalheLabel}>Estoque Atual:</Text>
                 <Text
                   style={[
@@ -337,61 +529,52 @@ export default function ProductListScreen({ navigation }) {
                 </Text>
               </View>
 
-              {produtoSelecionado.category && (
-                <View style={styles.detalheItem}>
-                  <Text style={styles.detalheLabel}>Categoria:</Text>
-                  <Text style={styles.detalheValor}>
-                    {produtoSelecionado.category.name}
-                  </Text>
-                </View>
-              )}
+              <ScrollView>
+                <Text style={styles.configTitulo}>Dados do Produto</Text>
+                <TextInput
+                  label="Nome"
+                  value={editNome}
+                  onChangeText={setEditNome}
+                  mode="outlined"
+                  style={styles.input}
+                />
+                <TextInput
+                  label="Preço de Venda"
+                  value={editValue}
+                  onChangeText={setEditValue}
+                  mode="outlined"
+                  keyboardType="decimal-pad"
+                  style={styles.input}
+                />
+                <TextInput
+                  label="Preço de Custo"
+                  value={editValueCusto}
+                  onChangeText={setEditValueCusto}
+                  mode="outlined"
+                  keyboardType="decimal-pad"
+                  style={styles.input}
+                />
 
-              <View style={styles.estoqueButtons}>
-                <Button
-                  mode="contained"
-                  icon="plus"
-                  onPress={() => {
-                    Alert.prompt(
-                      'Adicionar Estoque',
-                      'Quantidade a adicionar:',
-                      [
-                        { text: 'Cancelar', style: 'cancel' },
-                        {
-                          text: 'Confirmar',
-                          onPress: (qtd) =>
-                            atualizarEstoque(produtoSelecionado.id, qtd, 'adicionar'),
-                        },
-                      ],
-                      'plain-text'
-                    );
-                  }}
-                  style={[styles.estoqueButton, styles.adicionarButton]}
-                >
-                  Adicionar
-                </Button>
-                <Button
-                  mode="contained"
-                  icon="minus"
-                  onPress={() => {
-                    Alert.prompt(
-                      'Remover Estoque',
-                      'Quantidade a remover:',
-                      [
-                        { text: 'Cancelar', style: 'cancel' },
-                        {
-                          text: 'Confirmar',
-                          onPress: (qtd) =>
-                            atualizarEstoque(produtoSelecionado.id, qtd, 'remover'),
-                        },
-                      ],
-                      'plain-text'
-                    );
-                  }}
-                  style={[styles.estoqueButton, styles.removerButton]}
-                >
-                  Remover
-                </Button>
-              </View>
+                <Text style={styles.configLabel}>Categoria:</Text>
+                <View style={styles.configChips}>
+                  <Chip
+                    selected={!editCategoryId}
+                    onPress={() => setEditCategoryId(null)}
+                    style={styles.configChip}
+                  >
+                    Sem categoria
+                  </Chip>
+                  {categoriasFlat().map((c) => (
+                    <Chip
+                      key={c.id}
+                      selected={editCategoryId === c.id}
+                      onPress={() => setEditCategoryId(c.id)}
+                      style={styles.configChip}
+                    >
+                      {c.name}
+                    </Chip>
+                  ))}
+                </View>
 
               <View style={styles.configSection}>
                 <Text style={styles.configTitulo}>Configurações do PDV</Text>
@@ -446,9 +629,22 @@ export default function ProductListScreen({ navigation }) {
                   disabled={savingConfig}
                   style={styles.salvarConfigButton}
                 >
-                  Salvar configuração
+                  Salvar produto
                 </Button>
               </View>
+
+              <Button
+                mode="contained"
+                icon="delete"
+                buttonColor="#F44336"
+                onPress={excluirProduto}
+                loading={deletingProduto}
+                disabled={deletingProduto}
+                style={styles.fecharButton}
+              >
+                Excluir produto
+              </Button>
+              </ScrollView>
 
               <Button
                 mode="outlined"
@@ -459,6 +655,218 @@ export default function ProductListScreen({ navigation }) {
               </Button>
             </>
           )}
+        </Modal>
+
+        {/* Modal Gerenciar Categorias */}
+        <Modal
+          visible={catModalVisible}
+          onDismiss={() => setCatModalVisible(false)}
+          contentContainerStyle={styles.modal}
+        >
+          <Text style={styles.modalTitle}>Gerenciar Categorias</Text>
+          <ScrollView style={styles.crudScroll}>
+            <TextInput
+              label="Nova categoria"
+              value={novaCategoria}
+              onChangeText={setNovaCategoria}
+              mode="outlined"
+              style={styles.input}
+            />
+            <Text style={styles.configLabel}>Categoria pai (opcional):</Text>
+            <View style={styles.configChips}>
+              <Chip
+                selected={!novaCatParentId}
+                onPress={() => setNovaCatParentId(null)}
+                style={styles.configChip}
+              >
+                Principal
+              </Chip>
+              {categorias.map((c) => (
+                <Chip
+                  key={c.id}
+                  selected={novaCatParentId === c.id}
+                  onPress={() => setNovaCatParentId(c.id)}
+                  style={styles.configChip}
+                >
+                  {c.name}
+                </Chip>
+              ))}
+            </View>
+            <Button
+              mode="contained"
+              icon="plus"
+              onPress={adicionarCategoria}
+              loading={savingCat}
+              disabled={savingCat}
+              style={styles.salvarConfigButton}
+            >
+              Adicionar categoria
+            </Button>
+
+            <Divider style={styles.crudDivider} />
+            <Text style={styles.configTitulo}>Categorias existentes</Text>
+            {categorias.length === 0 && (
+              <Text style={styles.configVazio}>Nenhuma categoria cadastrada.</Text>
+            )}
+            {categorias.map((c) => (
+              <View key={c.id}>
+                <View style={styles.crudRow}>
+                  <Text style={styles.crudNome}>{c.name}</Text>
+                  <IconButton
+                    icon="delete"
+                    size={20}
+                    iconColor="#F44336"
+                    onPress={() => excluirCategoria(c)}
+                  />
+                </View>
+                {(c.subcategories || []).map((s) => (
+                  <View key={s.id} style={[styles.crudRow, styles.crudSubRow]}>
+                    <Text style={styles.crudSubNome}>› {s.name}</Text>
+                    <IconButton
+                      icon="delete"
+                      size={20}
+                      iconColor="#F44336"
+                      onPress={() => excluirCategoria(s)}
+                    />
+                  </View>
+                ))}
+              </View>
+            ))}
+          </ScrollView>
+          <Button
+            mode="outlined"
+            onPress={() => setCatModalVisible(false)}
+            style={styles.fecharButton}
+          >
+            Fechar
+          </Button>
+        </Modal>
+
+        {/* Modal Gerenciar Unidades */}
+        <Modal
+          visible={unidModalVisible}
+          onDismiss={() => setUnidModalVisible(false)}
+          contentContainerStyle={styles.modal}
+        >
+          <Text style={styles.modalTitle}>Gerenciar Unidades</Text>
+          <ScrollView style={styles.crudScroll}>
+            {!unitEditando && (
+              <TextInput
+                label="Nome da unidade"
+                value={unitNome}
+                onChangeText={setUnitNome}
+                mode="outlined"
+                style={styles.input}
+              />
+            )}
+            {unitEditando && (
+              <Text style={styles.editandoLabel}>Editando: {unitEditando}</Text>
+            )}
+
+            <Text style={styles.configLabel}>Tipo:</Text>
+            <View style={styles.configChips}>
+              <Chip
+                selected={unitTipo === 'empacotada'}
+                onPress={() => setUnitTipo('empacotada')}
+                style={styles.configChip}
+              >
+                Empacotada
+              </Chip>
+              <Chip
+                selected={unitTipo === 'porcao'}
+                onPress={() => setUnitTipo('porcao')}
+                style={styles.configChip}
+              >
+                Porção/Fracionada
+              </Chip>
+            </View>
+
+            {unitTipo === 'empacotada' ? (
+              <TextInput
+                label="Quantas unidades = 1 (ex: 12)"
+                value={unitValor}
+                onChangeText={setUnitValor}
+                mode="outlined"
+                keyboardType="decimal-pad"
+                style={styles.input}
+              />
+            ) : (
+              <>
+                <TextInput
+                  label="Porções por unidade-pai (ex: 9)"
+                  value={unitFracionado}
+                  onChangeText={setUnitFracionado}
+                  mode="outlined"
+                  keyboardType="decimal-pad"
+                  style={styles.input}
+                />
+                {unitFracionado !== '' && parseFloat(unitFracionado) > 0 && (
+                  <Text style={styles.unitHint}>
+                    1 unidade-pai → {unitFracionado} {(unitEditando || unitNome) || 'un'}(s)
+                  </Text>
+                )}
+              </>
+            )}
+
+            <View style={styles.modalButtons}>
+              {unitEditando && (
+                <Button
+                  mode="outlined"
+                  onPress={limparUnitForm}
+                  style={styles.modalButton}
+                >
+                  Cancelar edição
+                </Button>
+              )}
+              <Button
+                mode="contained"
+                icon="content-save"
+                onPress={salvarUnidade}
+                loading={savingUnit}
+                disabled={savingUnit}
+                style={styles.modalButton}
+              >
+                {unitEditando ? 'Salvar' : 'Adicionar'}
+              </Button>
+            </View>
+
+            <Divider style={styles.crudDivider} />
+            <Text style={styles.configTitulo}>Unidades existentes</Text>
+            {unidades.length === 0 && (
+              <Text style={styles.configVazio}>Nenhuma unidade cadastrada.</Text>
+            )}
+            {unidades.map((u) => (
+              <View key={u.unitName} style={styles.crudRow}>
+                <View style={styles.crudUnitInfo}>
+                  <Text style={styles.crudNome}>{u.unitName}</Text>
+                  <Text style={styles.crudUnitSub}>
+                    {u.isFractional
+                      ? `1 pai → ${u.fractionalValue} porções`
+                      : `1 ${u.unitName} = ${u.value} un`}
+                  </Text>
+                </View>
+                <IconButton
+                  icon="pencil"
+                  size={20}
+                  iconColor="#2196F3"
+                  onPress={() => editarUnidade(u)}
+                />
+                <IconButton
+                  icon="delete"
+                  size={20}
+                  iconColor="#F44336"
+                  onPress={() => excluirUnidade(u.unitName)}
+                />
+              </View>
+            ))}
+          </ScrollView>
+          <Button
+            mode="outlined"
+            onPress={() => setUnidModalVisible(false)}
+            style={styles.fecharButton}
+          >
+            Fechar
+          </Button>
         </Modal>
       </Portal>
     </View>
@@ -626,5 +1034,48 @@ const styles = StyleSheet.create({
   salvarConfigButton: {
     marginTop: 12,
     backgroundColor: '#8BC34A',
+  },
+  crudScroll: {
+    maxHeight: 420,
+  },
+  crudDivider: {
+    marginVertical: 16,
+  },
+  crudRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 2,
+  },
+  crudSubRow: {
+    paddingLeft: 16,
+  },
+  crudNome: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  crudSubNome: {
+    flex: 1,
+    fontSize: 14,
+    color: '#555',
+  },
+  crudUnitInfo: {
+    flex: 1,
+  },
+  crudUnitSub: {
+    fontSize: 12,
+    color: '#888',
+  },
+  editandoLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#2196F3',
+    marginBottom: 8,
+  },
+  unitHint: {
+    fontSize: 12,
+    color: '#4CAF50',
+    marginBottom: 8,
   },
 });
