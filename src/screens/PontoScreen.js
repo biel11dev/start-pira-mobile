@@ -254,14 +254,14 @@ export default function PontoScreen({ navigation }) {
     }
   };
 
-  // Buscar desconto de vale (Gastos Bar: produtos no vale + vales em dinheiro) do funcionário no período
+  // Buscar desconto de vale (Gastos Bar: produtos no vale + vales em dinheiro) do funcionário no período.
+  // Usa o endpoint por funcionário (match case-insensitive no backend) com intervalo ISO exato.
   const buscarDescontoVale = async (nome, inicio, fim) => {
     try {
-      const de = inicio.toISOString().split('T')[0];
-      const ate = fim.toISOString().split('T')[0];
-      const res = await api.get('/api/pdv-gastos-bar/resumo', { params: { de, ate } });
-      const entry = (res.data || []).find((f) => f.funcionario === nome);
-      return parseFloat(entry?.total) || 0;
+      const res = await api.get(`/api/pdv-gastos-bar/funcionario/${encodeURIComponent(nome.trim())}`, {
+        params: { startDate: inicio.toISOString(), endDate: fim.toISOString() },
+      });
+      return parseFloat(res.data?.total) || 0;
     } catch (error) {
       console.error('Erro ao buscar gastos bar do funcionário:', error);
       return 0;
@@ -276,20 +276,15 @@ export default function PontoScreen({ navigation }) {
     setGastosModalLoading(true);
     setGastosModalVisible(true);
     try {
-      const de = range.inicio.toISOString().split('T')[0];
-      const ate = range.fim.toISOString().split('T')[0];
-      const res = await api.get('/api/pdv-gastos-bar/resumo', { params: { de, ate } });
-      const entry = (res.data || []).find((f) => f.funcionario === range.nome);
-      setGastosModalData(
-        entry
-          ? {
-              total: entry.total || 0,
-              totalProdutos: entry.totalProdutos || 0,
-              totalVales: entry.totalDescontos || 0,
-              itens: entry.itens || [],
-            }
-          : { total: 0, totalProdutos: 0, totalVales: 0, itens: [] }
-      );
+      const res = await api.get(`/api/pdv-gastos-bar/funcionario/${encodeURIComponent(range.nome.trim())}`, {
+        params: { startDate: range.inicio.toISOString(), endDate: range.fim.toISOString() },
+      });
+      setGastosModalData({
+        total: res.data?.total || 0,
+        totalProdutos: res.data?.totalProdutos || 0,
+        totalVales: res.data?.totalVales || 0,
+        itens: res.data?.itens || [],
+      });
     } catch (error) {
       console.error('Erro ao carregar detalhes dos gastos:', error);
       setGastosModalData({ total: 0, totalProdutos: 0, totalVales: 0, itens: [] });

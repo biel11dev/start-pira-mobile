@@ -163,6 +163,17 @@ export default function PDVScreen({ navigation }) {
   const [premioObs, setPremioObs] = useState('');
   const [savingPremio, setSavingPremio] = useState(false);
 
+  // Composição (produtos dose / com componentes)
+  const [compModalProduct, setCompModalProduct] = useState(null);
+  const [compSelections, setCompSelections] = useState({}); // { composicaoId: [opcaoId, ...] }
+
+  // Cadastro rápido de cliente (fiado/comanda)
+  const [novoClienteNome, setNovoClienteNome] = useState('');
+  const [savingCliente, setSavingCliente] = useState(false);
+
+  // Venda conjunta (Compra + Saque na mesma venda)
+  const [saqueVendaValor, setSaqueVendaValor] = useState('');
+
   // Config. Venda
   const [configTab, setConfigTab] = useState('cupons'); // cupons | taxas | limites | formas | saque | origens
   const [cupons, setCupons] = useState([]);
@@ -173,6 +184,9 @@ export default function PDVScreen({ navigation }) {
   const [limiteEdits, setLimiteEdits] = useState({});
   const [formasConfig, setFormasConfig] = useState([]);
   const [pointConfig, setPointConfig] = useState(null);
+  const [pointTerminals, setPointTerminals] = useState([]);
+  const [loadingPointTerminals, setLoadingPointTerminals] = useState(false);
+  const [savingPointConfig, setSavingPointConfig] = useState(false);
   const [novaFormaNome, setNovaFormaNome] = useState('');
   const [taxaSaqueInput, setTaxaSaqueInput] = useState('');
   const [savingTaxaSaque, setSavingTaxaSaque] = useState(false);
@@ -394,8 +408,27 @@ export default function PDVScreen({ navigation }) {
   };
 
   // ---- Prêmio ----
-  const escolherImagemPremio = async (setImage) => {
+  const escolherImagemPremio = async (setImage, source = 'galeria') => {
     try {
+      if (source === 'camera') {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) {
+          Alert.alert('Permissão', 'Permita o acesso à câmera para tirar a foto.');
+          return;
+        }
+        const result = await ImagePicker.launchCameraAsync({
+          quality: 0.6,
+          base64: true,
+        });
+        if (result.canceled) return;
+        const asset = result.assets[0];
+        if (!asset?.base64) {
+          Alert.alert('Erro', 'Não foi possível ler a imagem');
+          return;
+        }
+        setImage(`data:image/jpeg;base64,${asset.base64}`);
+        return;
+      }
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
         Alert.alert('Permissão', 'Permita o acesso às fotos para anexar o comprovante.');
@@ -416,6 +449,15 @@ export default function PDVScreen({ navigation }) {
     } catch (error) {
       Alert.alert('Erro', 'Falha ao selecionar imagem');
     }
+  };
+
+  // Pergunta a origem da imagem (câmera ou galeria) antes de anexar
+  const anexarImagemPremio = (setImage) => {
+    Alert.alert('Comprovante', 'Escolha a origem da imagem', [
+      { text: 'Câmera', onPress: () => escolherImagemPremio(setImage, 'camera') },
+      { text: 'Galeria', onPress: () => escolherImagemPremio(setImage, 'galeria') },
+      { text: 'Cancelar', style: 'cancel' },
+    ]);
   };
 
   const premioAvancar = (toStep) => {
@@ -509,6 +551,41 @@ export default function PDVScreen({ navigation }) {
       carregarFormasPagamento();
     } catch (e) {
       Alert.alert('Erro', 'Erro ao atualizar integração da maquininha');
+    }
+  };
+
+  // ---- Maquininha (Mercado Pago Point): busca/seleção de terminal ----
+  const buscarMaquininhas = async () => {
+    setLoadingPointTerminals(true);
+    try {
+      const res = await api.get('/api/point/terminals');
+      setPointTerminals(res.data?.terminals || []);
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao listar maquininhas');
+    } finally {
+      setLoadingPointTerminals(false);
+    }
+  };
+
+  const salvarPointConfig = async (patch) => {
+    setSavingPointConfig(true);
+    try {
+      const res = await api.put('/api/point/config', patch);
+      setPointConfig(res.data || null);
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao salvar configuração da maquininha');
+    } finally {
+      setSavingPointConfig(false);
+    }
+  };
+
+  const setPointTerminalMode = async (terminalId, mode) => {
+    try {
+      await api.post('/api/point/terminals/mode', { terminalId, mode });
+      Alert.alert('Sucesso', `Modo do terminal alterado para ${mode}.`);
+      buscarMaquininhas();
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao alterar modo do terminal');
     }
   };
 
@@ -858,11 +935,18 @@ export default function PDVScreen({ navigation }) {
   };
 
   const adicionarAoCarrinho = (produto) => {
-    const itemExistente = carrinho.find((item) => item.id === produto.id);
+    // Produto com composição (dose / componentes): abre modal de seleção
+    if (produto.composicoes && produto.composicoes.length > 0) {
+      setCompSelections({});
+      setCompModalProduct(produto);
+      return;
+    }
+    const key = `simple-${produto.id}`;
+    const itemExistente = carrinho.find((item) => item.compostoKey === key);
     if (itemExistente) {
       setCarrinho(
         carrinho.map((item) =>
-          item.id === produto.id
+          item.compostoKey === key
             ? { ...item, quantidade: item.quantidade + 1 }
             : item
         )
@@ -877,21 +961,124 @@ export default function PDVScreen({ navigation }) {
           unit: produto.unit,
           maxQuantity: produto.quantity,
           quantidade: 1,
+          compostoKey: key,
         },
       ]);
     }
   };
 
-  const removerDoCarrinho = (produtoId) => {
-    const item = carrinho.find((i) => i.id === produtoId);
-    if (item.quantidade > 1) {
+  // Incrementa a quantidade de um item já no carrinho (respeita compostoKey)
+  const incrementarCarrinho = (item) => {
+    setCarrinho(
+      carrinho.map((i) =>
+        i.compostoKey === item.compostoKey ? { ...i, quantidade: i.quantidade + 1 } : i
+      )
+    );
+  };
+
+  const removerDoCarrinho = (item) => {
+    const alvo = carrinho.find((i) => i.compostoKey === item.compostoKey);
+    if (!alvo) return;
+    if (alvo.quantidade > 1) {
       setCarrinho(
         carrinho.map((i) =>
-          i.id === produtoId ? { ...i, quantidade: i.quantidade - 1 } : i
+          i.compostoKey === item.compostoKey ? { ...i, quantidade: i.quantidade - 1 } : i
         )
       );
     } else {
-      setCarrinho(carrinho.filter((i) => i.id !== produtoId));
+      setCarrinho(carrinho.filter((i) => i.compostoKey !== item.compostoKey));
+    }
+  };
+
+  // Alterna uma opção dentro de uma composição
+  const toggleCompOpcao = (composicaoId, opcaoId, multiplo, maxOpcoes) => {
+    setCompSelections((prev) => {
+      const current = prev[composicaoId] || [];
+      if (current.includes(opcaoId)) {
+        return { ...prev, [composicaoId]: current.filter((id) => id !== opcaoId) };
+      }
+      if (!multiplo) return { ...prev, [composicaoId]: [opcaoId] };
+      if (current.length >= maxOpcoes)
+        return { ...prev, [composicaoId]: [...current.slice(1), opcaoId] };
+      return { ...prev, [composicaoId]: [...current, opcaoId] };
+    });
+  };
+
+  // Confirma a composição e adiciona o item montado ao carrinho
+  const confirmComposicao = () => {
+    if (!compModalProduct) return;
+    if (compModalProduct.quantity < 1) {
+      Alert.alert('Estoque', `Estoque insuficiente para "${compModalProduct.name}".`);
+      return;
+    }
+    const comps = compModalProduct.composicoes || [];
+    for (const comp of comps) {
+      if (comp.obrigatorio && !(compSelections[comp.id] || []).length) {
+        Alert.alert('Atenção', `Selecione uma opção para "${comp.nome}".`);
+        return;
+      }
+    }
+    let extraTotal = 0;
+    const labelParts = [];
+    comps.forEach((comp) => {
+      const sel = compSelections[comp.id] || [];
+      const selectedOpcoes = (comp.opcoes || []).filter((o) => sel.includes(o.id));
+      selectedOpcoes.forEach((o) => {
+        extraTotal += o.valorExtra || 0;
+      });
+      if (selectedOpcoes.length > 0)
+        labelParts.push(`${comp.nome}: ${selectedOpcoes.map((o) => o.nome).join(', ')}`);
+    });
+    const finalPrice = compModalProduct.value + extraTotal;
+    const composicaoLabel = labelParts.join(' | ');
+    const composicaoJSON = JSON.stringify(compSelections);
+    const key = `${compModalProduct.id}__${composicaoJSON}`;
+    const existente = carrinho.find((i) => i.compostoKey === key);
+    if (existente) {
+      setCarrinho(
+        carrinho.map((i) =>
+          i.compostoKey === key ? { ...i, quantidade: i.quantidade + 1 } : i
+        )
+      );
+    } else {
+      setCarrinho([
+        ...carrinho,
+        {
+          id: compModalProduct.id,
+          name: compModalProduct.name,
+          value: finalPrice,
+          unit: compModalProduct.unit,
+          maxQuantity: compModalProduct.quantity,
+          quantidade: 1,
+          compostoKey: key,
+          composicao: composicaoJSON,
+          composicaoLabel,
+        },
+      ]);
+    }
+    setCompModalProduct(null);
+    setCompSelections({});
+  };
+
+  // Cadastro rápido de cliente durante o fluxo de fiado/comanda
+  const cadastrarClienteInline = async () => {
+    const nome = novoClienteNome.trim();
+    if (!nome) {
+      Alert.alert('Atenção', 'Informe o nome do cliente');
+      return;
+    }
+    setSavingCliente(true);
+    try {
+      const res = await api.post('/api/clients', { name: nome, totalDebt: 0 });
+      const novo = res.data;
+      await carregarClientes();
+      if (novo?.id) setClienteFiadoId(novo.id);
+      setNovoClienteNome('');
+      Alert.alert('Sucesso', 'Cliente cadastrado!');
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao cadastrar cliente');
+    } finally {
+      setSavingCliente(false);
     }
   };
 
@@ -936,6 +1123,7 @@ export default function PDVScreen({ navigation }) {
     setClienteFiadoId(null);
     setDescontoTipo('VALOR');
     setDescontoValor('');
+    setSaqueVendaValor('');
     setCheckoutVisible(true);
   };
 
@@ -944,6 +1132,7 @@ export default function PDVScreen({ navigation }) {
     const descontoAmount = calcularDesconto(subtotal);
     const finalTotal = subtotal - descontoAmount;
     const cliente = clientes.find((c) => c.id === pendenteClientId);
+    const saqueV = parseFloat(saqueVendaValor) || 0;
 
     return {
       items: carrinho.map((i) => ({
@@ -953,6 +1142,9 @@ export default function PDVScreen({ navigation }) {
         quantity: i.quantidade,
         unit: i.unit,
         maxQuantity: i.maxQuantity,
+        ...(i.composicao
+          ? { composicao: i.composicao, composicaoLabel: i.composicaoLabel }
+          : {}),
       })),
       total: finalTotal,
       paymentMethod: paymentLabel,
@@ -967,7 +1159,7 @@ export default function PDVScreen({ navigation }) {
       splitPayments: null,
       pendente: pendenteClientId ? { clientId: pendenteClientId } : null,
       vale: valePassword ? { password: valePassword } : null,
-      saque: null,
+      saque: saqueV > 0 ? { valor: saqueV, taxa: taxaSaque } : null,
       subtotal,
       finalTotal,
     };
@@ -1007,7 +1199,7 @@ export default function PDVScreen({ navigation }) {
 
   // Carrega os itens de uma comanda no carrinho e abre o checkout
   const iniciarPagamentoComanda = (comanda, clienteNome) => {
-    const itens = (comanda.items || []).map((item) => ({
+    const itens = (comanda.items || []).map((item, idx) => ({
       id: item.estoqueId || item.id,
       name: item.productName || item.name,
       value: item.unitPrice ?? item.price ?? 0,
@@ -1015,6 +1207,7 @@ export default function PDVScreen({ navigation }) {
       maxQuantity: item.quantity,
       quantidade: item.quantity,
       fromComanda: true,
+      compostoKey: `comanda-${item.estoqueId || item.id}-${idx}`,
     }));
     setCarrinho(itens);
     setComandaEmPagamento({ ...comanda, clienteNome: clienteNome || comanda.clienteNome });
@@ -1024,6 +1217,7 @@ export default function PDVScreen({ navigation }) {
     setClienteFiadoId(null);
     setDescontoTipo('VALOR');
     setDescontoValor('');
+    setSaqueVendaValor('');
     setCheckoutVisible(true);
   };
 
@@ -1036,11 +1230,14 @@ export default function PDVScreen({ navigation }) {
     const tipo = tipoForma(formaSelecionada);
     const label = formaSelecionada.nome;
     const finalTotal = calcularTotalFinal();
+    const saqueV = parseFloat(saqueVendaValor) || 0;
+    const saqueFee = saqueV > 0 ? saqueV * (taxaSaque / 100) : 0;
+    const totalCobrar = finalTotal + saqueV + saqueFee;
 
     // Validações específicas
     if (tipo === 'dinheiro') {
       const recebido = parseFloat(valorRecebido) || 0;
-      if (recebido < finalTotal) {
+      if (recebido < totalCobrar) {
         Alert.alert('Atenção', 'Valor recebido é menor que o total');
         return;
       }
@@ -1057,11 +1254,11 @@ export default function PDVScreen({ navigation }) {
     // Pix e Maquininha têm fluxo próprio (integração + polling),
     // válido também para pagamento de comanda.
     if (tipo === 'pix') {
-      await iniciarPix(finalTotal, label);
+      await iniciarPix(totalCobrar, label);
       return;
     }
     if (tipo === 'point') {
-      await iniciarPagamentoPoint(formaSelecionada, finalTotal, label);
+      await iniciarPagamentoPoint(formaSelecionada, totalCobrar, label);
       return;
     }
 
@@ -1071,11 +1268,11 @@ export default function PDVScreen({ navigation }) {
       if (comandaEmPagamento) {
         await fecharComanda(label);
       } else {
-        const recebido = parseFloat(valorRecebido) || finalTotal;
+        const recebido = parseFloat(valorRecebido) || totalCobrar;
         const body = montarBodyVenda({
           paymentLabel: label,
-          amountReceived: tipo === 'dinheiro' ? recebido : finalTotal,
-          change: tipo === 'dinheiro' ? recebido - finalTotal : 0,
+          amountReceived: tipo === 'dinheiro' ? recebido : totalCobrar,
+          change: tipo === 'dinheiro' ? recebido - totalCobrar : 0,
           valePassword: tipo === 'vale' ? senhaVale : null,
           pendenteClientId: tipo === 'fiado' ? clienteFiadoId : null,
         });
@@ -1133,6 +1330,7 @@ export default function PDVScreen({ navigation }) {
     setSenhaVale('');
     setClienteFiadoId(null);
     setDescontoValor('');
+    setSaqueVendaValor('');
     setComandaEmPagamento(null);
     if (eraComanda) {
       setSubTab('comandas');
@@ -1294,6 +1492,8 @@ export default function PDVScreen({ navigation }) {
   const desconto = calcularDesconto(subtotal);
   const totalFinal = subtotal - desconto;
   const tipoSel = tipoForma(formaSelecionada);
+  const saqueVendaNum = parseFloat(saqueVendaValor) || 0;
+  const valorCobrado = totalFinal + saqueVendaNum * (1 + taxaSaque / 100);
 
   return (
     <View style={styles.container}>
@@ -1350,7 +1550,7 @@ export default function PDVScreen({ navigation }) {
             selected={subTab === 'premio'}
             onPress={() => {
               setSubTab('premio');
-              carregarOrigens();
+              carregarOrigemSaldos();
             }}
             style={styles.subTabChip}
             icon="trophy"
@@ -1530,11 +1730,14 @@ export default function PDVScreen({ navigation }) {
               ) : (
                 <ScrollView style={styles.carrinhoLista}>
                   {carrinho.map((item) => (
-                    <View key={item.id} style={styles.carrinhoItem}>
+                    <View key={item.compostoKey} style={styles.carrinhoItem}>
                       <View style={styles.carrinhoItemInfo}>
                         <Text style={styles.carrinhoItemNome}>
                           {item.name} ({item.unit})
                         </Text>
+                        {item.composicaoLabel ? (
+                          <Text style={styles.carrinhoItemComp}>{item.composicaoLabel}</Text>
+                        ) : null}
                         <Text style={styles.carrinhoItemPreco}>
                           R$ {formatarValor(item.value * item.quantidade)}
                         </Text>
@@ -1543,13 +1746,13 @@ export default function PDVScreen({ navigation }) {
                         <IconButton
                           icon="minus"
                           size={20}
-                          onPress={() => removerDoCarrinho(item.id)}
+                          onPress={() => removerDoCarrinho(item)}
                         />
                         <Text style={styles.quantidade}>{item.quantidade}</Text>
                         <IconButton
                           icon="plus"
                           size={20}
-                          onPress={() => adicionarAoCarrinho(item)}
+                          onPress={() => incrementarCarrinho(item)}
                         />
                       </View>
                     </View>
@@ -1826,7 +2029,7 @@ export default function PDVScreen({ navigation }) {
                     <Button
                       mode="outlined"
                       icon="camera"
-                      onPress={() => escolherImagemPremio(setPremioImagem1)}
+                      onPress={() => anexarImagemPremio(setPremioImagem1)}
                       textColor="#2196F3"
                       style={{ marginTop: 8 }}
                     >
@@ -1860,7 +2063,7 @@ export default function PDVScreen({ navigation }) {
                     <Button
                       mode="outlined"
                       icon="camera"
-                      onPress={() => escolherImagemPremio(setPremioImagem2)}
+                      onPress={() => anexarImagemPremio(setPremioImagem2)}
                       textColor="#2196F3"
                       style={{ marginVertical: 8 }}
                     >
@@ -1876,7 +2079,7 @@ export default function PDVScreen({ navigation }) {
                     style={styles.saqueInput}
                   />
                   <Text style={styles.secaoLabel}>Origens</Text>
-                  <OrigemRows origens={premioOrigens} setOrigens={setPremioOrigens} origensDisponiveis={origensDisponiveis} />
+                  <OrigemRows origens={premioOrigens} setOrigens={setPremioOrigens} origensDisponiveis={origemSaldos.filter((o) => o.nome !== 'CAIXA')} />
                   <Text style={styles.saqueInfo}>
                     Soma das origens: R$ {formatarValor(somaOrigens(premioOrigens))}
                   </Text>
@@ -2368,6 +2571,119 @@ export default function PDVScreen({ navigation }) {
                       <Divider style={styles.formaConfigDivider} />
                     </View>
                   ))
+                )}
+
+                {/* Maquininha Mercado Pago Point */}
+                <Divider style={styles.divider} />
+                <Text style={styles.pointConfigTitulo}>Maquininha Mercado Pago Point</Text>
+                {!pointConfig?.tokenConfigured ? (
+                  <Text style={styles.saqueInfo}>
+                    A integração com a maquininha ainda não está disponível. Verifique se o
+                    token do Mercado Pago (MP_ACCESS_TOKEN) foi configurado no servidor.
+                  </Text>
+                ) : (
+                  <>
+                    <Button
+                      mode="contained"
+                      icon="magnify"
+                      onPress={buscarMaquininhas}
+                      loading={loadingPointTerminals}
+                      disabled={loadingPointTerminals}
+                      style={{ marginTop: 8 }}
+                    >
+                      Buscar maquininhas
+                    </Button>
+                    <Text style={styles.pointTerminalAtual}>
+                      Terminal atual:{' '}
+                      <Text style={styles.pointTerminalAtualId}>
+                        {pointConfig.terminal_id || 'não definido'}
+                      </Text>
+                    </Text>
+
+                    {pointTerminals.map((t) => {
+                      const selecionado = pointConfig.terminal_id === t.id;
+                      return (
+                        <View
+                          key={t.id}
+                          style={[
+                            styles.pointTerminalRow,
+                            selecionado && styles.pointTerminalRowSel,
+                          ]}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.pointTerminalId}>{t.id}</Text>
+                            <Text style={styles.pointTerminalModo}>
+                              Modo: {t.operating_mode || '-'}
+                            </Text>
+                          </View>
+                          <View style={styles.pointTerminalAcoes}>
+                            <Button
+                              mode={selecionado ? 'contained' : 'outlined'}
+                              compact
+                              disabled={savingPointConfig}
+                              onPress={() => salvarPointConfig({ terminal_id: t.id })}
+                              textColor={selecionado ? undefined : '#fff'}
+                            >
+                              {selecionado ? '✓ Selecionado' : 'Selecionar'}
+                            </Button>
+                            {t.operating_mode !== 'PDV' && (
+                              <Button
+                                mode="text"
+                                compact
+                                onPress={() => setPointTerminalMode(t.id, 'PDV')}
+                              >
+                                Ativar modo PDV
+                              </Button>
+                            )}
+                          </View>
+                        </View>
+                      );
+                    })}
+
+                    <View style={styles.formaPointRow}>
+                      <Checkbox.Android
+                        status={
+                          pointConfig.print_on_terminal === 'seller_ticket'
+                            ? 'checked'
+                            : 'unchecked'
+                        }
+                        color="#2196F3"
+                        onPress={() =>
+                          salvarPointConfig({
+                            print_on_terminal:
+                              pointConfig.print_on_terminal === 'seller_ticket'
+                                ? 'no_ticket'
+                                : 'seller_ticket',
+                          })
+                        }
+                      />
+                      <Text style={styles.formaPointLabel}>
+                        Imprimir comprovante no terminal
+                      </Text>
+                    </View>
+
+                    <View style={styles.pointParcelasRow}>
+                      <Text style={styles.formaPointLabel}>Parcelas padrão (crédito):</Text>
+                      <TextInput
+                        mode="outlined"
+                        dense
+                        keyboardType="number-pad"
+                        value={String(pointConfig.default_installments || 1)}
+                        onChangeText={(v) =>
+                          setPointConfig({
+                            ...pointConfig,
+                            default_installments: parseInt(v, 10) || 1,
+                          })
+                        }
+                        onBlur={() =>
+                          salvarPointConfig({
+                            default_installments: pointConfig.default_installments || 1,
+                          })
+                        }
+                        style={styles.pointParcelasInput}
+                      />
+                    </View>
+                  </>
                 )}
               </Card.Content>
             </Card>
@@ -2977,7 +3293,7 @@ export default function PDVScreen({ navigation }) {
                 />
                 {parseFloat(valorRecebido) > 0 && (
                   <Text style={styles.trocoTexto}>
-                    Troco: R$ {formatarValor(Math.max((parseFloat(valorRecebido) || 0) - totalFinal, 0))}
+                    Troco: R$ {formatarValor(Math.max((parseFloat(valorRecebido) || 0) - valorCobrado, 0))}
                   </Text>
                 )}
               </View>
@@ -3007,6 +3323,26 @@ export default function PDVScreen({ navigation }) {
                 >
                   Carregar clientes
                 </Button>
+                <View style={styles.novoClienteRow}>
+                  <TextInput
+                    label="Novo cliente"
+                    mode="outlined"
+                    dense
+                    value={novoClienteNome}
+                    onChangeText={setNovoClienteNome}
+                    style={styles.novoClienteInput}
+                  />
+                  <Button
+                    mode="contained"
+                    icon="account-plus"
+                    onPress={cadastrarClienteInline}
+                    loading={savingCliente}
+                    disabled={savingCliente}
+                    compact
+                  >
+                    Cadastrar
+                  </Button>
+                </View>
                 <ScrollView style={styles.clientesLista}>
                   <RadioButton.Group
                     onValueChange={(v) => setClienteFiadoId(Number(v))}
@@ -3023,6 +3359,49 @@ export default function PDVScreen({ navigation }) {
                   </RadioButton.Group>
                 </ScrollView>
               </View>
+            )}
+
+            {/* Venda conjunta: Compra + Saque (dinheiro em nota na máquina) */}
+            {!comandaEmPagamento && (
+              <>
+                <Divider style={styles.divider} />
+                <Text style={styles.secaoLabel}>Saque na venda (opcional)</Text>
+                <TextInput
+                  label="Valor do saque (R$)"
+                  mode="outlined"
+                  keyboardType="numeric"
+                  value={saqueVendaValor}
+                  onChangeText={setSaqueVendaValor}
+                  placeholder="0,00"
+                />
+                {(parseFloat(saqueVendaValor) || 0) > 0 && (
+                  <View style={styles.saqueVendaBox}>
+                    <View style={styles.resumoLinha}>
+                      <Text style={styles.resumoTexto}>Cliente recebe:</Text>
+                      <Text style={styles.resumoTexto}>
+                        R$ {formatarValor(parseFloat(saqueVendaValor) || 0)}
+                      </Text>
+                    </View>
+                    <View style={styles.resumoLinha}>
+                      <Text style={styles.resumoTexto}>
+                        Taxa ({taxaSaque}%):
+                      </Text>
+                      <Text style={styles.resumoTexto}>
+                        + R$ {formatarValor((parseFloat(saqueVendaValor) || 0) * (taxaSaque / 100))}
+                      </Text>
+                    </View>
+                    <View style={styles.resumoLinha}>
+                      <Text style={styles.totalModalLabel}>Total a cobrar:</Text>
+                      <Text style={styles.totalModalValor}>
+                        R$ {formatarValor(
+                          totalFinal +
+                            (parseFloat(saqueVendaValor) || 0) * (1 + taxaSaque / 100)
+                        )}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </>
             )}
 
             <View style={styles.modalBotoes}>
@@ -3045,6 +3424,107 @@ export default function PDVScreen({ navigation }) {
               </Button>
             </View>
           </ScrollView>
+        </Modal>
+
+        {/* Modal de composição (produtos dose / com componentes) */}
+        <Modal
+          visible={!!compModalProduct}
+          onDismiss={() => setCompModalProduct(null)}
+          contentContainerStyle={styles.modalContent}
+        >
+          {compModalProduct && (
+            <ScrollView>
+              <Text style={styles.modalTitle}>{compModalProduct.name}</Text>
+              {(() => {
+                const composicoes = compModalProduct.composicoes || [];
+                // Divulgação progressiva: mostra até a primeira composição sem seleção
+                const firstEmptyIdx = composicoes.findIndex(
+                  (comp) => !(compSelections[comp.id] || []).length
+                );
+                const visibleComps =
+                  firstEmptyIdx === -1
+                    ? composicoes
+                    : composicoes.slice(0, firstEmptyIdx + 1);
+                return visibleComps.map((comp) => (
+                  <View key={comp.id} style={styles.compGroup}>
+                    <View style={styles.compGroupHeader}>
+                      <Text style={styles.compGroupNome}>
+                        {comp.nome}
+                        {comp.obrigatorio ? ' *' : ''}
+                      </Text>
+                      {comp.multiplo && (
+                        <Text style={styles.compGroupMulti}>até {comp.maxOpcoes}</Text>
+                      )}
+                    </View>
+                    {(comp.opcoes || [])
+                      .filter((o) => o.disponivel)
+                      .map((opcao) => {
+                        const selected = (compSelections[comp.id] || []).includes(opcao.id);
+                        const stockQty = opcao.estoque?.quantity ?? null;
+                        const esgotado = stockQty != null && stockQty <= 0;
+                        return (
+                          <Chip
+                            key={opcao.id}
+                            selected={selected}
+                            disabled={esgotado}
+                            onPress={() =>
+                              !esgotado &&
+                              toggleCompOpcao(comp.id, opcao.id, comp.multiplo, comp.maxOpcoes)
+                            }
+                            style={styles.compOpcaoChip}
+                            showSelectedCheck
+                          >
+                            {opcao.nome}
+                            {opcao.valorExtra > 0
+                              ? ` (+R$ ${formatarValor(opcao.valorExtra)})`
+                              : ''}
+                            {esgotado ? ' ✕' : ''}
+                          </Chip>
+                        );
+                      })}
+                  </View>
+                ));
+              })()}
+
+              <Divider style={styles.divider} />
+              <View style={styles.resumoLinha}>
+                <Text style={styles.totalModalLabel}>Total:</Text>
+                <Text style={styles.totalModalValor}>
+                  R${' '}
+                  {formatarValor(
+                    (compModalProduct.value || 0) +
+                      (compModalProduct.composicoes || []).reduce((sum, comp) => {
+                        const sel = compSelections[comp.id] || [];
+                        return (
+                          sum +
+                          (comp.opcoes || [])
+                            .filter((o) => sel.includes(o.id))
+                            .reduce((s, o) => s + (o.valorExtra || 0), 0)
+                        );
+                      }, 0)
+                  )}
+                </Text>
+              </View>
+
+              <View style={styles.modalBotoes}>
+                <Button
+                  mode="contained"
+                  onPress={confirmComposicao}
+                  style={styles.confirmarButton}
+                  icon="cart-plus"
+                >
+                  Adicionar ao Carrinho
+                </Button>
+                <Button
+                  mode="outlined"
+                  onPress={() => setCompModalProduct(null)}
+                  textColor="#fff"
+                >
+                  Cancelar
+                </Button>
+              </View>
+            </ScrollView>
+          )}
         </Modal>
 
         {/* Modal Pix */}
@@ -3315,6 +3795,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     flex: 1,
   },
+  carrinhoItemComp: {
+    fontSize: 11,
+    color: '#90caf9',
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
   carrinhoItemPreco: {
     fontSize: 13,
     fontWeight: 'bold',
@@ -3563,6 +4049,42 @@ const styles = StyleSheet.create({
   },
   clientesLista: {
     maxHeight: 200,
+  },
+  novoClienteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  novoClienteInput: {
+    flex: 1,
+    marginRight: 8,
+  },
+  saqueVendaBox: {
+    marginTop: 8,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(33,150,243,0.12)',
+  },
+  compGroup: {
+    marginBottom: 12,
+  },
+  compGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  compGroupNome: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  compGroupMulti: {
+    fontSize: 12,
+    color: '#90caf9',
+  },
+  compOpcaoChip: {
+    marginBottom: 6,
   },
   modalBotoes: {
     marginTop: 16,
@@ -3870,6 +4392,59 @@ const styles = StyleSheet.create({
   formaConfigDivider: {
     backgroundColor: '#333',
     marginTop: 6,
+  },
+  pointConfigTitulo: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  pointTerminalAtual: {
+    color: '#ccc',
+    fontSize: 13,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  pointTerminalAtualId: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  pointTerminalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  pointTerminalRowSel: {
+    backgroundColor: 'rgba(76,175,80,0.12)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+  },
+  pointTerminalId: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  pointTerminalModo: {
+    color: '#999',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  pointTerminalAcoes: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  pointParcelasRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  pointParcelasInput: {
+    width: 70,
+    marginLeft: 8,
   },
   configItemSub: {
     color: '#999',

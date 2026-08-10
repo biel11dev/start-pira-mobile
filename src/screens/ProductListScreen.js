@@ -35,6 +35,8 @@ export default function ProductListScreen({ navigation }) {
   const [preco, setPreco] = useState('');
   const [precoCusto, setPrecoCusto] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
+  const [unitProduto, setUnitProduto] = useState('Unidade');
+  const [baseUnitProduto, setBaseUnitProduto] = useState(null);
 
   // Categorias
   const [categorias, setCategorias] = useState([]);
@@ -70,6 +72,7 @@ export default function ProductListScreen({ navigation }) {
   useEffect(() => {
     carregarProdutos();
     carregarCategorias();
+    carregarUnidades();
   }, []);
 
   const carregarProdutos = async () => {
@@ -102,6 +105,12 @@ export default function ProductListScreen({ navigation }) {
     return out;
   };
 
+  // Opções de unidade de medida (sempre inclui "Unidade" + equivalências cadastradas)
+  const unidadesOpcoes = () => {
+    const nomes = ['Unidade', ...(unidades || []).map((u) => u.unitName)];
+    return [...new Set(nomes.filter(Boolean))];
+  };
+
   const adicionarProduto = async () => {
     if (!nomeProduto || !preco || !precoCusto) {
       Alert.alert('Atenção', 'Preencha nome, preço de venda e preço de custo');
@@ -112,11 +121,11 @@ export default function ProductListScreen({ navigation }) {
     try {
       await api.post('/api/products', {
         name: nomeProduto,
-        unit: 'un',
+        unit: unitProduto || 'Unidade',
         value: parseFloat(preco),
         valuecusto: parseFloat(precoCusto),
         categoryId: selectedCategoryId,
-        baseUnit: null,
+        baseUnit: baseUnitProduto || null,
       });
 
       Alert.alert('Sucesso', 'Produto cadastrado!');
@@ -216,6 +225,8 @@ export default function ProductListScreen({ navigation }) {
     setPreco('');
     setPrecoCusto('');
     setSelectedCategoryId(null);
+    setUnitProduto('Unidade');
+    setBaseUnitProduto(null);
   };
 
   // ===================== Categorias =====================
@@ -464,6 +475,41 @@ export default function ProductListScreen({ navigation }) {
               keyboardType="decimal-pad"
               style={styles.input}
             />
+
+            <Text style={styles.configLabel}>Unidade de Medida:</Text>
+            <View style={styles.configChips}>
+              {unidadesOpcoes().map((u) => (
+                <Chip
+                  key={u}
+                  selected={unitProduto === u}
+                  onPress={() => setUnitProduto(u)}
+                  style={styles.configChip}
+                >
+                  {u}
+                </Chip>
+              ))}
+            </View>
+
+            <Text style={styles.configLabel}>Unidade base (conversão):</Text>
+            <View style={styles.configChips}>
+              <Chip
+                selected={!baseUnitProduto}
+                onPress={() => setBaseUnitProduto(null)}
+                style={styles.configChip}
+              >
+                Automática
+              </Chip>
+              {unidadesOpcoes().map((u) => (
+                <Chip
+                  key={u}
+                  selected={baseUnitProduto === u}
+                  onPress={() => setBaseUnitProduto(u)}
+                  style={styles.configChip}
+                >
+                  {u}
+                </Chip>
+              ))}
+            </View>
 
             <Text style={styles.configLabel}>Categoria:</Text>
             <View style={styles.configChips}>
