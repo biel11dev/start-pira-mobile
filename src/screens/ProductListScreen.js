@@ -44,6 +44,8 @@ export default function ProductListScreen({ navigation }) {
   // Configuração de PDV do produto selecionado
   const [baseUnitEdit, setBaseUnitEdit] = useState(null);
   const [hiddenUnitsEdit, setHiddenUnitsEdit] = useState([]);
+  const [unitPricesEdit, setUnitPricesEdit] = useState({});
+  const [unitPricesModalVisible, setUnitPricesModalVisible] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
 
   // Edição do produto (no modal de detalhes)
@@ -143,6 +145,7 @@ export default function ProductListScreen({ navigation }) {
     setProdutoSelecionado(produto);
     setBaseUnitEdit(produto.baseUnit || null);
     setHiddenUnitsEdit(Array.isArray(produto.pdvHiddenUnits) ? produto.pdvHiddenUnits : []);
+    setUnitPricesEdit(produto.unitPrices && typeof produto.unitPrices === 'object' ? produto.unitPrices : {});
     setEditNome(produto.name || '');
     setEditValue(produto.value != null ? String(produto.value) : '');
     setEditValueCusto(produto.valuecusto != null ? String(produto.valuecusto) : '');
@@ -164,6 +167,36 @@ export default function ProductListScreen({ navigation }) {
     );
   };
 
+  // Atualiza (em string, para edição) o valor de venda/custo de uma unidade
+  const atualizarUnitPrice = (unit, field, val) => {
+    setUnitPricesEdit((prev) => {
+      const up = { ...(prev || {}) };
+      const entry = { ...(up[unit] || {}) };
+      if (val === '' || val == null) delete entry[field];
+      else entry[field] = val;
+      if (Object.keys(entry).length === 0) delete up[unit];
+      else up[unit] = entry;
+      return up;
+    });
+  };
+
+  // Converte os valores digitados (string, com vírgula ou ponto) para números ao salvar
+  const normalizarUnitPrices = (obj) => {
+    const out = {};
+    Object.entries(obj || {}).forEach(([unit, cfg]) => {
+      const entry = {};
+      ['value', 'cost'].forEach((field) => {
+        const raw = cfg?.[field];
+        if (raw !== undefined && raw !== null && String(raw) !== '') {
+          const n = parseFloat(String(raw).replace(',', '.'));
+          if (!isNaN(n)) entry[field] = n;
+        }
+      });
+      if (Object.keys(entry).length) out[unit] = entry;
+    });
+    return out;
+  };
+
   const salvarConfigPdv = async () => {
     if (!produtoSelecionado) return;
     if (!editNome.trim()) {
@@ -181,6 +214,7 @@ export default function ProductListScreen({ navigation }) {
         categoryId: editCategoryId || null,
         baseUnit: baseUnitEdit || null,
         pdvHiddenUnits: hiddenUnitsEdit,
+        unitPrices: normalizarUnitPrices(unitPricesEdit),
       });
       Alert.alert('Sucesso', 'Produto atualizado!');
       setModalDetalhes(false);
@@ -667,6 +701,20 @@ export default function ProductListScreen({ navigation }) {
                   <Text style={styles.configVazio}>Nenhuma unidade em estoque.</Text>
                 )}
 
+                <Text style={styles.configLabel}>Valores por unidade:</Text>
+                {unidadesDoProduto(produtoSelecionado).length === 0 ? (
+                  <Text style={styles.configVazio}>Dê entrada no estoque para definir valores por unidade.</Text>
+                ) : (
+                  <Button
+                    mode="outlined"
+                    icon="currency-usd"
+                    onPress={() => setUnitPricesModalVisible(true)}
+                    style={styles.configChip}
+                  >
+                    Venda/custo por unidade
+                  </Button>
+                )}
+
                 <Button
                   mode="contained"
                   icon="content-save"
@@ -914,6 +962,59 @@ export default function ProductListScreen({ navigation }) {
             Fechar
           </Button>
         </Modal>
+
+        {/* Modal: valores de venda/custo por unidade */}
+        <Modal
+          visible={unitPricesModalVisible}
+          onDismiss={() => setUnitPricesModalVisible(false)}
+          contentContainerStyle={styles.modal}
+        >
+          <Text style={styles.modalTitle}>Valores por unidade</Text>
+          <Text style={styles.configVazio}>
+            Defina o valor de venda e de custo de cada unidade. Serão sugeridos na entrada de estoque.
+          </Text>
+          <ScrollView style={{ maxHeight: 380 }}>
+            {unidadesDoProduto(produtoSelecionado).map((u) => {
+              const cfg = (unitPricesEdit || {})[u] || {};
+              return (
+                <View key={u} style={styles.unitPriceRow}>
+                  <Text style={styles.unitPriceNome}>{u}</Text>
+                  <View style={styles.unitPriceInputs}>
+                    <TextInput
+                      label="Venda (R$)"
+                      mode="outlined"
+                      dense
+                      keyboardType="decimal-pad"
+                      value={cfg.value != null ? String(cfg.value) : ''}
+                      onChangeText={(t) => atualizarUnitPrice(u, 'value', t)}
+                      style={styles.unitPriceInput}
+                    />
+                    <TextInput
+                      label="Custo (R$)"
+                      mode="outlined"
+                      dense
+                      keyboardType="decimal-pad"
+                      value={cfg.cost != null ? String(cfg.cost) : ''}
+                      onChangeText={(t) => atualizarUnitPrice(u, 'cost', t)}
+                      style={styles.unitPriceInput}
+                    />
+                  </View>
+                </View>
+              );
+            })}
+            {unidadesDoProduto(produtoSelecionado).length === 0 && (
+              <Text style={styles.configVazio}>Nenhuma unidade em estoque.</Text>
+            )}
+          </ScrollView>
+          <Button
+            mode="contained"
+            icon="check"
+            onPress={() => setUnitPricesModalVisible(false)}
+            style={styles.salvarConfigButton}
+          >
+            Concluir
+          </Button>
+        </Modal>
       </Portal>
     </View>
   );
@@ -1080,6 +1181,23 @@ const styles = StyleSheet.create({
   salvarConfigButton: {
     marginTop: 12,
     backgroundColor: '#8BC34A',
+  },
+  unitPriceRow: {
+    marginBottom: 12,
+  },
+  unitPriceNome: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  unitPriceInputs: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  unitPriceInput: {
+    flex: 1,
+    backgroundColor: '#fff',
   },
   crudScroll: {
     maxHeight: 420,

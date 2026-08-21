@@ -105,6 +105,7 @@ export default function PDVScreen({ navigation }) {
   const [valorRecebido, setValorRecebido] = useState('');
   const [senhaVale, setSenhaVale] = useState('');
   const [clienteFiadoId, setClienteFiadoId] = useState(null);
+  const [clienteBusca, setClienteBusca] = useState('');
   const [descontoTipo, setDescontoTipo] = useState('VALOR'); // VALOR | PERCENTUAL
   const [descontoValor, setDescontoValor] = useState('');
 
@@ -1121,6 +1122,7 @@ export default function PDVScreen({ navigation }) {
     setValorRecebido('');
     setSenhaVale('');
     setClienteFiadoId(null);
+    setClienteBusca('');
     setDescontoTipo('VALOR');
     setDescontoValor('');
     setSaqueVendaValor('');
@@ -1215,6 +1217,7 @@ export default function PDVScreen({ navigation }) {
     setValorRecebido('');
     setSenhaVale('');
     setClienteFiadoId(null);
+    setClienteBusca('');
     setDescontoTipo('VALOR');
     setDescontoValor('');
     setSaqueVendaValor('');
@@ -2079,7 +2082,7 @@ export default function PDVScreen({ navigation }) {
                     style={styles.saqueInput}
                   />
                   <Text style={styles.secaoLabel}>Origens</Text>
-                  <OrigemRows origens={premioOrigens} setOrigens={setPremioOrigens} origensDisponiveis={origemSaldos.filter((o) => o.nome !== 'CAIXA')} />
+                  <OrigemRows origens={premioOrigens} setOrigens={setPremioOrigens} origensDisponiveis={origemSaldos} />
                   <Text style={styles.saqueInfo}>
                     Soma das origens: R$ {formatarValor(somaOrigens(premioOrigens))}
                   </Text>
@@ -3268,7 +3271,9 @@ export default function PDVScreen({ navigation }) {
             <Divider style={styles.divider} />
             <Text style={styles.secaoLabel}>Forma de pagamento</Text>
             <View style={styles.formasContainer}>
-              {formasPagamento.map((forma) => (
+              {formasPagamento
+                .filter((forma) => !comandaEmPagamento || forma.valor !== 'pendente')
+                .map((forma) => (
                 <Chip
                   key={forma.id}
                   selected={formaSelecionada?.id === forma.id}
@@ -3343,12 +3348,27 @@ export default function PDVScreen({ navigation }) {
                     Cadastrar
                   </Button>
                 </View>
+                <TextInput
+                  label="Buscar cliente..."
+                  mode="outlined"
+                  dense
+                  value={clienteBusca}
+                  onChangeText={setClienteBusca}
+                  left={<TextInput.Icon icon="magnify" />}
+                  style={{ marginBottom: 8 }}
+                />
                 <ScrollView style={styles.clientesLista}>
                   <RadioButton.Group
                     onValueChange={(v) => setClienteFiadoId(Number(v))}
                     value={clienteFiadoId ? String(clienteFiadoId) : ''}
                   >
-                    {clientes.map((c) => (
+                    {clientes
+                      .filter((c) =>
+                        (c.name || '')
+                          .toLowerCase()
+                          .includes(clienteBusca.toLowerCase())
+                      )
+                      .map((c) => (
                       <RadioButton.Item
                         key={c.id}
                         label={c.name}
@@ -3356,6 +3376,11 @@ export default function PDVScreen({ navigation }) {
                         labelStyle={{ color: '#fff' }}
                       />
                     ))}
+                    {clientes.filter((c) =>
+                      (c.name || '').toLowerCase().includes(clienteBusca.toLowerCase())
+                    ).length === 0 && (
+                      <Text style={styles.subModuloVazio}>Nenhum cliente encontrado.</Text>
+                    )}
                   </RadioButton.Group>
                 </ScrollView>
               </View>
@@ -3377,6 +3402,11 @@ export default function PDVScreen({ navigation }) {
                 {(parseFloat(saqueVendaValor) || 0) > 0 && (
                   <View style={styles.saqueVendaBox}>
                     <View style={styles.resumoLinha}>
+                      <Text style={styles.totalModalLabel}>Total Carrinho:</Text>
+                      <Text style={styles.totalModalLabel}>R$ {formatarValor(totalFinal)}</Text>
+                    </View>
+                    <Divider style={styles.saqueVendaDivider} />
+                    <View style={styles.resumoLinha}>
                       <Text style={styles.resumoTexto}>Cliente recebe:</Text>
                       <Text style={styles.resumoTexto}>
                         R$ {formatarValor(parseFloat(saqueVendaValor) || 0)}
@@ -3391,7 +3421,14 @@ export default function PDVScreen({ navigation }) {
                       </Text>
                     </View>
                     <View style={styles.resumoLinha}>
-                      <Text style={styles.totalModalLabel}>Total a cobrar:</Text>
+                      <Text style={styles.totalModalLabel}>Total Saque:</Text>
+                      <Text style={styles.totalModalLabel}>
+                        R$ {formatarValor((parseFloat(saqueVendaValor) || 0) * (1 + taxaSaque / 100))}
+                      </Text>
+                    </View>
+                    <Divider style={styles.saqueVendaDivider} />
+                    <View style={styles.resumoLinha}>
+                      <Text style={styles.totalModalLabel}>Total à cobrar:</Text>
                       <Text style={styles.totalModalValor}>
                         R$ {formatarValor(
                           totalFinal +
@@ -3437,9 +3474,18 @@ export default function PDVScreen({ navigation }) {
               <Text style={styles.modalTitle}>{compModalProduct.name}</Text>
               {(() => {
                 const composicoes = compModalProduct.composicoes || [];
-                // Divulgação progressiva: mostra até a primeira composição sem seleção
+                // Divulgação progressiva: mostra até a primeira composição
+                // ainda não completa. Para composição "múltipla", só é
+                // considerada completa ao atingir o máximo de opções (maxOpcoes);
+                // para simples, basta 1 opção selecionada.
+                const compCompleta = (comp) => {
+                  const qtd = (compSelections[comp.id] || []).length;
+                  return comp.multiplo
+                    ? qtd >= (comp.maxOpcoes || 1)
+                    : qtd >= 1;
+                };
                 const firstEmptyIdx = composicoes.findIndex(
-                  (comp) => !(compSelections[comp.id] || []).length
+                  (comp) => !compCompleta(comp)
                 );
                 const visibleComps =
                   firstEmptyIdx === -1
@@ -4064,6 +4110,10 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 8,
     backgroundColor: 'rgba(33,150,243,0.12)',
+  },
+  saqueVendaDivider: {
+    marginVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
   compGroup: {
     marginBottom: 12,

@@ -40,6 +40,9 @@ export default function EstoqueScreen({ navigation }) {
   const [entradaBusca, setEntradaBusca] = useState('');
   const [entradaQuantidade, setEntradaQuantidade] = useState('');
   const [entradaUnidade, setEntradaUnidade] = useState('un');
+  const [entradaValor, setEntradaValor] = useState('');
+  const [entradaCusto, setEntradaCusto] = useState('');
+  const [entradaPickerVisible, setEntradaPickerVisible] = useState(false);
   const [savingEntrada, setSavingEntrada] = useState(false);
 
   // Quantidade ideal (mínimo)
@@ -82,6 +85,9 @@ export default function EstoqueScreen({ navigation }) {
   const [opcaoBusca, setOpcaoBusca] = useState('');
   const [opcaoGrupoId, setOpcaoGrupoId] = useState(null);
 
+  // Unidades fracionais cadastradas (ex.: Dose) — para desmembramento automático
+  const [unidadesFracionais, setUnidadesFracionais] = useState([]);
+
   useEffect(() => {
     carregarTudo();
   }, []);
@@ -89,10 +95,11 @@ export default function EstoqueScreen({ navigation }) {
   const carregarTudo = async () => {
     setLoading(true);
     try {
-      const [est, min, cat] = await Promise.all([
+      const [est, min, cat, eqs] = await Promise.all([
         api.get('/api/estoque_prod'),
         api.get('/api/estoque-minimo'),
         api.get('/api/products'),
+        api.get('/api/unit-equivalences'),
       ]);
       setEstoque(est.data || []);
       const mmap = {};
@@ -101,6 +108,11 @@ export default function EstoqueScreen({ navigation }) {
       });
       setMinimoMap(mmap);
       setCatalogo(cat.data || []);
+      setUnidadesFracionais(
+        (eqs.data || [])
+          .filter((e) => e.isFractional && e.fractionalValue > 0)
+          .map((e) => e.unitName)
+      );
     } catch (error) {
       console.error('❌ Erro ao carregar estoque:', error);
       Alert.alert('Erro', 'Não foi possível carregar o estoque');
@@ -122,8 +134,35 @@ export default function EstoqueScreen({ navigation }) {
     setEntradaBusca('');
     setEntradaQuantidade('');
     setEntradaUnidade('un');
+    setEntradaValor('');
+    setEntradaCusto('');
+    setEntradaPickerVisible(false);
     setEntradaVisible(true);
   };
+
+  // Pré-preenche venda/custo conforme a unidade escolhida (usa unitPrices do
+  // produto quando existir; senão o valor padrão do cadastro). Continua editável.
+  useEffect(() => {
+    if (!entradaProduto) return;
+    const cfg =
+      entradaProduto.unitPrices && typeof entradaProduto.unitPrices === 'object'
+        ? entradaProduto.unitPrices[entradaUnidade]
+        : null;
+    setEntradaValor(
+      cfg && cfg.value != null
+        ? String(cfg.value)
+        : entradaProduto.value != null
+        ? String(entradaProduto.value)
+        : ''
+    );
+    setEntradaCusto(
+      cfg && cfg.cost != null
+        ? String(cfg.cost)
+        : entradaProduto.valuecusto != null
+        ? String(entradaProduto.valuecusto)
+        : ''
+    );
+  }, [entradaProduto, entradaUnidade]);
 
   const confirmarEntrada = async () => {
     if (!entradaProduto || !entradaQuantidade || !entradaUnidade) {
@@ -132,10 +171,14 @@ export default function EstoqueScreen({ navigation }) {
     }
     setSavingEntrada(true);
     try {
+      const valorNum = parseFloat(String(entradaValor).replace(',', '.'));
+      const custoNum = parseFloat(String(entradaCusto).replace(',', '.'));
       await api.post('/api/estoque_prod/entrada', {
         productId: entradaProduto.id,
         quantity: parseInt(entradaQuantidade, 10),
         unit: entradaUnidade,
+        value: isNaN(valorNum) ? undefined : valorNum,
+        valuecusto: isNaN(custoNum) ? undefined : custoNum,
       });
       Alert.alert('Sucesso', 'Entrada registrada no estoque!');
       setEntradaVisible(false);
@@ -368,16 +411,39 @@ export default function EstoqueScreen({ navigation }) {
     }
   };
 
+  // Resolve o item que será vinculado como opção: se o produto for adicionado
+  // na unidade base mas possuir um registro de estoque em unidade fracional
+  // (ex.: Dose), redireciona a opção para a unidade fracional. O desmembramento
+  // é feito sob demanda na venda (conversão automática da unidade irmã).
+  const resolverAlvoFracional = (item) => {
+    const ehFracional = (u) => unidadesFracionais.includes(u);
+    if (ehFracional(item.unit)) return item; // já é fracional
+    const irmaoFracional = estoque.find(
+      (e) =>
+        e.productId === item.productId &&
+        e.id !== item.id &&
+        ehFracional(e.unit)
+    );
+    return irmaoFracional || item;
+  };
+
   const adicionarOpcaoComponente = async (grupoId, estoqueOpcao) => {
     try {
+      const alvo = resolverAlvoFracional(estoqueOpcao);
       await api.post(`/api/composicoes/${grupoId}/opcoes`, {
-        nome: estoqueOpcao.name,
+        nome: alvo.name,
         valorExtra: 0,
-        estoqueId: estoqueOpcao.id,
+        estoqueId: alvo.id,
       });
       setOpcaoBusca('');
       setOpcaoGrupoId(null);
       await carregarComposicoes(compItem.id);
+      if (alvo.id !== estoqueOpcao.id) {
+        Alert.alert(
+          'Desmembramento automático',
+          `"${estoqueOpcao.name}" foi vinculado na unidade fracional "${alvo.unit}". O desmembramento do estoque será feito automaticamente na venda.`
+        );
+      }
     } catch (error) {
       Alert.alert('Erro', error.response?.data?.error || 'Erro ao adicionar opção');
     }
@@ -569,36 +635,19 @@ export default function EstoqueScreen({ navigation }) {
                 </Card.Content>
               </Card>
             ) : (
-              <>
-                <TextInput
-                  label="Buscar produto no catálogo"
-                  value={entradaBusca}
-                  onChangeText={setEntradaBusca}
-                  mode="outlined"
-                  style={styles.input}
-                  theme={{ colors: { background: '#2a2a2a' } }}
-                />
-                <View style={styles.pickerLista}>
-                  {catalogoFiltrado.slice(0, 30).map((p) => (
-                    <Button
-                      key={p.id}
-                      mode="text"
-                      textColor="#fff"
-                      style={styles.pickerItem}
-                      contentStyle={{ justifyContent: 'flex-start' }}
-                      onPress={() => {
-                        setEntradaProduto(p);
-                        setEntradaUnidade(p.unit || 'un');
-                      }}
-                    >
-                      {p.name}
-                    </Button>
-                  ))}
-                  {catalogoFiltrado.length === 0 && (
-                    <Text style={styles.semDados}>Nenhum produto encontrado</Text>
-                  )}
-                </View>
-              </>
+              <Button
+                mode="outlined"
+                icon="magnify"
+                textColor="#fff"
+                style={styles.selecionarBtn}
+                contentStyle={{ justifyContent: 'flex-start' }}
+                onPress={() => {
+                  setEntradaBusca('');
+                  setEntradaPickerVisible(true);
+                }}
+              >
+                Selecionar produto do catálogo
+              </Button>
             )}
 
             <TextInput
@@ -621,8 +670,28 @@ export default function EstoqueScreen({ navigation }) {
               theme={{ colors: { background: '#2a2a2a' } }}
             />
 
+            <TextInput
+              label="Valor de venda (R$)"
+              value={entradaValor}
+              onChangeText={setEntradaValor}
+              mode="outlined"
+              keyboardType="decimal-pad"
+              style={styles.input}
+              theme={{ colors: { background: '#2a2a2a' } }}
+            />
+
+            <TextInput
+              label="Valor de custo (R$)"
+              value={entradaCusto}
+              onChangeText={setEntradaCusto}
+              mode="outlined"
+              keyboardType="decimal-pad"
+              style={styles.input}
+              theme={{ colors: { background: '#2a2a2a' } }}
+            />
+
             <Text style={styles.dica}>
-              A entrada não pede preço de custo/venda — os valores vêm do cadastro do produto.
+              Os valores vêm do cadastro do produto (por unidade, quando definido) e podem ser ajustados nesta entrada.
             </Text>
 
             <View style={styles.modalButtons}>
@@ -645,6 +714,54 @@ export default function EstoqueScreen({ navigation }) {
               </Button>
             </View>
           </ScrollView>
+        </Modal>
+
+        {/* ===== Modal: Seleção de produto (entrada) ===== */}
+        <Modal
+          visible={entradaPickerVisible}
+          onDismiss={() => setEntradaPickerVisible(false)}
+          contentContainerStyle={styles.modal}
+        >
+          <Text style={styles.modalTitle}>Selecionar produto</Text>
+          <TextInput
+            label="Filtrar produto"
+            value={entradaBusca}
+            onChangeText={setEntradaBusca}
+            mode="outlined"
+            autoFocus
+            left={<TextInput.Icon icon="magnify" />}
+            style={styles.input}
+            theme={{ colors: { background: '#2a2a2a' } }}
+          />
+          <ScrollView style={styles.pickerLista} keyboardShouldPersistTaps="handled">
+            {catalogoFiltrado.map((p) => (
+              <Button
+                key={p.id}
+                mode="text"
+                textColor="#fff"
+                style={styles.pickerItem}
+                contentStyle={{ justifyContent: 'flex-start' }}
+                onPress={() => {
+                  setEntradaProduto(p);
+                  setEntradaUnidade(p.unit || 'un');
+                  setEntradaPickerVisible(false);
+                }}
+              >
+                {p.name}
+              </Button>
+            ))}
+            {catalogoFiltrado.length === 0 && (
+              <Text style={styles.semDados}>Nenhum produto encontrado</Text>
+            )}
+          </ScrollView>
+          <Button
+            mode="outlined"
+            onPress={() => setEntradaPickerVisible(false)}
+            style={styles.modalButton}
+            textColor="#fff"
+          >
+            Fechar
+          </Button>
         </Modal>
 
         {/* ===== Modal: Quantidade ideal ===== */}
@@ -1224,9 +1341,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     flex: 1,
   },
+  selecionarBtn: {
+    marginBottom: 12,
+    borderColor: '#555',
+  },
   pickerLista: {
     marginBottom: 12,
-    maxHeight: 220,
+    maxHeight: 300,
   },
   pickerItem: {
     alignItems: 'flex-start',
