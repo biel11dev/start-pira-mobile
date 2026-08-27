@@ -128,6 +128,7 @@ export default function ProductListScreen({ navigation }) {
         valuecusto: parseFloat(precoCusto),
         categoryId: selectedCategoryId,
         baseUnit: baseUnitProduto || null,
+        unitPrices: normalizarUnitPrices(unitPricesEdit),
       });
 
       Alert.alert('Sucesso', 'Produto cadastrado!');
@@ -261,6 +262,8 @@ export default function ProductListScreen({ navigation }) {
     setSelectedCategoryId(null);
     setUnitProduto('Unidade');
     setBaseUnitProduto(null);
+    setUnitPricesEdit({});
+    setProdutoSelecionado(null);
   };
 
   // ===================== Categorias =====================
@@ -472,7 +475,7 @@ export default function ProductListScreen({ navigation }) {
       <FAB
         icon="plus"
         style={styles.fab}
-        onPress={() => setModalVisible(true)}
+        onPress={() => { limparForm(); setModalVisible(true); }}
       />
 
       <Portal>
@@ -565,6 +568,16 @@ export default function ProductListScreen({ navigation }) {
                 </Chip>
               ))}
             </View>
+
+            <Text style={styles.configLabel}>Valores por unidade:</Text>
+            <Button
+              mode="outlined"
+              icon="currency-usd"
+              onPress={() => setUnitPricesModalVisible(true)}
+              style={styles.configChip}
+            >
+              Venda/custo por unidade
+            </Button>
 
             <View style={styles.modalButtons}>
               <Button
@@ -702,18 +715,14 @@ export default function ProductListScreen({ navigation }) {
                 )}
 
                 <Text style={styles.configLabel}>Valores por unidade:</Text>
-                {unidadesDoProduto(produtoSelecionado).length === 0 ? (
-                  <Text style={styles.configVazio}>Dê entrada no estoque para definir valores por unidade.</Text>
-                ) : (
-                  <Button
-                    mode="outlined"
-                    icon="currency-usd"
-                    onPress={() => setUnitPricesModalVisible(true)}
-                    style={styles.configChip}
-                  >
-                    Venda/custo por unidade
-                  </Button>
-                )}
+                <Button
+                  mode="outlined"
+                  icon="currency-usd"
+                  onPress={() => setUnitPricesModalVisible(true)}
+                  style={styles.configChip}
+                >
+                  Venda/custo por unidade
+                </Button>
 
                 <Button
                   mode="contained"
@@ -974,7 +983,7 @@ export default function ProductListScreen({ navigation }) {
             Defina o valor de venda e de custo de cada unidade. Serão sugeridos na entrada de estoque.
           </Text>
           <ScrollView style={{ maxHeight: 380 }}>
-            {unidadesDoProduto(produtoSelecionado).map((u) => {
+            {unidadesOpcoes().map((u) => {
               const cfg = (unitPricesEdit || {})[u] || {};
               return (
                 <View key={u} style={styles.unitPriceRow}>
@@ -1002,9 +1011,6 @@ export default function ProductListScreen({ navigation }) {
                 </View>
               );
             })}
-            {unidadesDoProduto(produtoSelecionado).length === 0 && (
-              <Text style={styles.configVazio}>Nenhuma unidade em estoque.</Text>
-            )}
           </ScrollView>
           <Button
             mode="contained"
@@ -1188,7 +1194,7 @@ const styles = StyleSheet.create({
   unitPriceNome: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#fff',
+    color: '#333',
     marginBottom: 4,
   },
   unitPriceInputs: {

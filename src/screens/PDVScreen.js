@@ -1680,7 +1680,7 @@ export default function PDVScreen({ navigation }) {
                           <IconButton
                             icon="plus"
                             mode="contained"
-                            disabled={produto.quantity <= 0}
+                            disabled={produto.quantity <= 0 && !hasConversionSibling(produto)}
                             onPress={() => adicionarAoCarrinho(produto)}
                           />
                         </View>
@@ -1708,7 +1708,7 @@ export default function PDVScreen({ navigation }) {
                         <IconButton
                           icon="plus"
                           mode="contained"
-                          disabled={selecionado.quantity <= 0}
+                          disabled={selecionado.quantity <= 0 && !hasConversionSibling(selecionado)}
                           onPress={() => adicionarAoCarrinho(selecionado)}
                         />
                       </View>

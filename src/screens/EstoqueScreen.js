@@ -136,9 +136,13 @@ export default function EstoqueScreen({ navigation }) {
     (entradaProduto.estoqueItems || []).forEach((item) => {
       if (item?.unit) unidades.push(item.unit);
     });
-    (unidadesFracionais || []).forEach((unit) => {
-      if (!unidades.includes(unit)) unidades.push(unit);
-    });
+    // Unidades comercializáveis configuradas para ESTE produto (base de cadastro).
+    // Só as unidades atreladas ao produto — não todas as fracionais do sistema.
+    if (entradaProduto.unitPrices && typeof entradaProduto.unitPrices === 'object') {
+      Object.keys(entradaProduto.unitPrices).forEach((unit) => {
+        if (unit && !unidades.includes(unit)) unidades.push(unit);
+      });
+    }
     return unidades.length ? [...new Set(unidades.filter(Boolean))] : ['un'];
   };
 
@@ -684,11 +688,12 @@ export default function EstoqueScreen({ navigation }) {
               <Picker
                 selectedValue={entradaUnidade}
                 onValueChange={(value) => setEntradaUnidade(value)}
-                dropdownIconColor="#fff"
+                dropdownIconColor="#333"
+                mode="dropdown"
                 style={styles.picker}
               >
                 {unidadesDisponiveisEntrada().map((unit) => (
-                  <Picker.Item key={unit} label={unit} value={unit} color="#fff" />
+                  <Picker.Item key={unit} label={unit} value={unit} color="#111" />
                 ))}
               </Picker>
             </View>
@@ -1367,6 +1372,17 @@ const styles = StyleSheet.create({
   selecionarBtn: {
     marginBottom: 12,
     borderColor: '#555',
+  },
+  pickerWrap: {
+    backgroundColor: '#fff',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  picker: {
+    color: '#111',
   },
   pickerLista: {
     marginBottom: 12,
