@@ -935,6 +935,11 @@ export default function PDVScreen({ navigation }) {
     }
   };
 
+  const hasConversionSibling = (produto) => {
+    if (!produto || !produto.productId) return false;
+    return produtos.some((item) => item.productId === produto.productId && item.id !== produto.id);
+  };
+
   const adicionarAoCarrinho = (produto) => {
     // Produto com composição (dose / componentes): abre modal de seleção
     if (produto.composicoes && produto.composicoes.length > 0) {
@@ -944,11 +949,19 @@ export default function PDVScreen({ navigation }) {
     }
     const key = `simple-${produto.id}`;
     const itemExistente = carrinho.find((item) => item.compostoKey === key);
+    const maxAvailable = itemExistente?.maxQuantity ?? produto.quantity ?? 0;
+    const novaQuantidade = itemExistente ? itemExistente.quantidade + 1 : 1;
+
+    if (maxAvailable < novaQuantidade && !hasConversionSibling(produto)) {
+      Alert.alert('Estoque', `Estoque insuficiente para "${produto.name}". Disponível: ${maxAvailable}.`);
+      return;
+    }
+
     if (itemExistente) {
       setCarrinho(
         carrinho.map((item) =>
           item.compostoKey === key
-            ? { ...item, quantidade: item.quantidade + 1 }
+            ? { ...item, quantidade: novaQuantidade }
             : item
         )
       );
@@ -970,9 +983,18 @@ export default function PDVScreen({ navigation }) {
 
   // Incrementa a quantidade de um item já no carrinho (respeita compostoKey)
   const incrementarCarrinho = (item) => {
+    const productRef = produtos.find((p) => p.id === item.id) || item;
+    const maxAvailable = productRef?.quantity ?? item.maxQuantity ?? 0;
+    const novaQuantidade = (item.quantidade || 1) + 1;
+
+    if (maxAvailable < novaQuantidade && !hasConversionSibling(productRef)) {
+      Alert.alert('Estoque', `Estoque insuficiente para "${item.name}". Disponível: ${maxAvailable}.`);
+      return;
+    }
+
     setCarrinho(
       carrinho.map((i) =>
-        i.compostoKey === item.compostoKey ? { ...i, quantidade: i.quantidade + 1 } : i
+        i.compostoKey === item.compostoKey ? { ...i, quantidade: novaQuantidade } : i
       )
     );
   };

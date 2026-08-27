@@ -22,6 +22,7 @@ import {
   ActivityIndicator,
   SegmentedButtons,
 } from 'react-native-paper';
+import { Picker } from '@react-native-picker/picker';
 import api from '../services/api';
 import { formatarValor } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
@@ -128,6 +129,19 @@ export default function EstoqueScreen({ navigation }) {
     return qtd <= 0;
   };
 
+  const unidadesDisponiveisEntrada = () => {
+    if (!entradaProduto) return ['un'];
+    const unidades = [];
+    if (entradaProduto.unit) unidades.push(entradaProduto.unit);
+    (entradaProduto.estoqueItems || []).forEach((item) => {
+      if (item?.unit) unidades.push(item.unit);
+    });
+    (unidadesFracionais || []).forEach((unit) => {
+      if (!unidades.includes(unit)) unidades.push(unit);
+    });
+    return unidades.length ? [...new Set(unidades.filter(Boolean))] : ['un'];
+  };
+
   // ===== Entrada de estoque (sem preço de custo/venda) =====
   const abrirEntrada = () => {
     setEntradaProduto(null);
@@ -144,6 +158,11 @@ export default function EstoqueScreen({ navigation }) {
   // produto quando existir; senão o valor padrão do cadastro). Continua editável.
   useEffect(() => {
     if (!entradaProduto) return;
+    const opcoes = unidadesDisponiveisEntrada();
+    if (!opcoes.includes(entradaUnidade)) {
+      setEntradaUnidade(opcoes[0] || 'un');
+      return;
+    }
     const cfg =
       entradaProduto.unitPrices && typeof entradaProduto.unitPrices === 'object'
         ? entradaProduto.unitPrices[entradaUnidade]
@@ -162,7 +181,7 @@ export default function EstoqueScreen({ navigation }) {
         ? String(entradaProduto.valuecusto)
         : ''
     );
-  }, [entradaProduto, entradaUnidade]);
+  }, [entradaProduto, entradaUnidade, unidadesFracionais]);
 
   const confirmarEntrada = async () => {
     if (!entradaProduto || !entradaQuantidade || !entradaUnidade) {
@@ -660,15 +679,19 @@ export default function EstoqueScreen({ navigation }) {
               theme={{ colors: { background: '#2a2a2a' } }}
             />
 
-            <TextInput
-              label="Unidade *"
-              value={entradaUnidade}
-              onChangeText={setEntradaUnidade}
-              mode="outlined"
-              placeholder="un, kg, l, fardo, caixa..."
-              style={styles.input}
-              theme={{ colors: { background: '#2a2a2a' } }}
-            />
+            <Text style={styles.label}>Unidade *</Text>
+            <View style={styles.pickerWrap}>
+              <Picker
+                selectedValue={entradaUnidade}
+                onValueChange={(value) => setEntradaUnidade(value)}
+                dropdownIconColor="#fff"
+                style={styles.picker}
+              >
+                {unidadesDisponiveisEntrada().map((unit) => (
+                  <Picker.Item key={unit} label={unit} value={unit} color="#fff" />
+                ))}
+              </Picker>
+            </View>
 
             <TextInput
               label="Valor de venda (R$)"
