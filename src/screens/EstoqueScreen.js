@@ -167,10 +167,21 @@ export default function EstoqueScreen({ navigation }) {
       setEntradaUnidade(opcoes[0] || 'un');
       return;
     }
-    const cfg =
+    // Resolve o preço da unidade selecionada: casa a chave exata e, se não achar,
+    // tenta por nome normalizado (ignora caixa/espaços) para evitar divergências
+    // entre a unidade da base de cadastro e a unidade escolhida na entrada.
+    const up =
       entradaProduto.unitPrices && typeof entradaProduto.unitPrices === 'object'
-        ? entradaProduto.unitPrices[entradaUnidade]
-        : null;
+        ? entradaProduto.unitPrices
+        : {};
+    let cfg = up[entradaUnidade];
+    if (!cfg && entradaUnidade) {
+      const alvo = String(entradaUnidade).trim().toLowerCase();
+      const chave = Object.keys(up).find(
+        (k) => String(k).trim().toLowerCase() === alvo
+      );
+      if (chave) cfg = up[chave];
+    }
     setEntradaValor(
       cfg && cfg.value != null
         ? String(cfg.value)

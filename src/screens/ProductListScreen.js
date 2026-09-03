@@ -162,6 +162,13 @@ export default function ProductListScreen({ navigation }) {
     return [...new Set(units.filter(Boolean))];
   };
 
+  // Unidades comercializáveis para o modal de preços:
+  // na edição, as do produto selecionado; na criação, a(s) unidade(s) definida(s) no formulário.
+  const unidadesComercializaveis = () =>
+    produtoSelecionado
+      ? unidadesDoProduto(produtoSelecionado)
+      : [...new Set([unitProduto, baseUnitProduto].filter(Boolean))];
+
   const toggleUnidadePdv = (unit) => {
     setHiddenUnitsEdit((prev) =>
       prev.includes(unit) ? prev.filter((u) => u !== unit) : [...prev, unit]
@@ -983,7 +990,7 @@ export default function ProductListScreen({ navigation }) {
             Defina o valor de venda e de custo de cada unidade. Serão sugeridos na entrada de estoque.
           </Text>
           <ScrollView style={{ maxHeight: 380 }}>
-            {unidadesOpcoes().map((u) => {
+            {unidadesComercializaveis().map((u) => {
               const cfg = (unitPricesEdit || {})[u] || {};
               return (
                 <View key={u} style={styles.unitPriceRow}>
@@ -1011,6 +1018,9 @@ export default function ProductListScreen({ navigation }) {
                 </View>
               );
             })}
+            {unidadesComercializaveis().length === 0 && (
+              <Text style={styles.configVazio}>Dê entrada no estoque para definir valores por unidade.</Text>
+            )}
           </ScrollView>
           <Button
             mode="contained"
