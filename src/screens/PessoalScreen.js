@@ -23,8 +23,10 @@ import {
 } from 'react-native-paper';
 import { Picker } from '@react-native-picker/picker';
 import api from '../services/api';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function PessoalScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const [despesas, setDespesas] = useState([]);
   const [categorias, setCategorias] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
@@ -629,7 +631,7 @@ export default function PessoalScreen({ navigation }) {
 
       <FAB
         icon="plus"
-        style={styles.fab}
+        style={[styles.fab, { bottom: 16 + insets.bottom }]}
         onPress={() => setModalVisible(true)}
         label="Adicionar"
       />

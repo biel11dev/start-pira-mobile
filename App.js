@@ -1,6 +1,7 @@
 import React from 'react';
 import { StatusBar } from 'react-native';
 import { Provider as PaperProvider, MD3DarkTheme } from 'react-native-paper';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from './src/context/AuthContext';
 import Routes from './src/navigation/Routes';
 
@@ -19,11 +20,13 @@ const darkTheme = {
 
 export default function App() {
   return (
-    <PaperProvider theme={darkTheme}>
-      <AuthProvider>
-        <StatusBar barStyle="light-content" backgroundColor="#000000" />
-        <Routes />
-      </AuthProvider>
-    </PaperProvider>
+    <SafeAreaProvider>
+      <PaperProvider theme={darkTheme}>
+        <AuthProvider>
+          <StatusBar barStyle="light-content" backgroundColor="#000000" />
+          <Routes />
+        </AuthProvider>
+      </PaperProvider>
+    </SafeAreaProvider>
   );
 }
