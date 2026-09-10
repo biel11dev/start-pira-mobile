@@ -89,6 +89,8 @@ export default function EstoqueScreen({ navigation }) {
   const [novaCompMaxPorcoes, setNovaCompMaxPorcoes] = useState('4');
   const [novaCompGratis, setNovaCompGratis] = useState('2');
   const [novaCompAdicional, setNovaCompAdicional] = useState('2.50');
+  const [editMontagemId, setEditMontagemId] = useState(null);
+  const [montagemEdit, setMontagemEdit] = useState({ montagem: false, maxOpcoes: '4', porcoesGratis: '2', valorAdicional: '2.50' });
   const [savingComp, setSavingComp] = useState(false);
   const [opcaoBusca, setOpcaoBusca] = useState('');
   const [opcaoGrupoId, setOpcaoGrupoId] = useState(null);
@@ -452,6 +454,38 @@ export default function EstoqueScreen({ navigation }) {
       Alert.alert('Erro', error.response?.data?.error || 'Erro ao criar componente');
     } finally {
       setSavingComp(false);
+    }
+  };
+
+  const abrirEdicaoMontagem = (grupo) => {
+    const isMont = grupo.multiplo && (grupo.valorAdicional || 0) > 0;
+    setEditMontagemId(grupo.id);
+    setMontagemEdit({
+      montagem: isMont,
+      maxOpcoes: String(grupo.maxOpcoes && grupo.maxOpcoes > 1 ? grupo.maxOpcoes : 4),
+      porcoesGratis: String(grupo.porcoesGratis || 2),
+      valorAdicional: String(grupo.valorAdicional || 2.5),
+    });
+  };
+
+  const salvarMontagemGrupo = async (grupo) => {
+    try {
+      const m = montagemEdit;
+      await api.put(`/api/composicoes/${grupo.id}`, {
+        nome: grupo.nome,
+        descricao: grupo.descricao || '',
+        obrigatorio: m.montagem ? true : grupo.obrigatorio,
+        multiplo: m.montagem ? true : grupo.multiplo,
+        minOpcoes: 1,
+        maxOpcoes: m.montagem ? (parseInt(m.maxOpcoes) || 4) : grupo.maxOpcoes,
+        porcoesGratis: m.montagem ? (parseInt(m.porcoesGratis) || 0) : 0,
+        valorAdicional: m.montagem ? (parseFloat(String(m.valorAdicional).replace(',', '.')) || 0) : 0,
+        ordem: grupo.ordem || 0,
+      });
+      setEditMontagemId(null);
+      await carregarComposicoes(compItem.id);
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao salvar montagem');
     }
   };
 
@@ -997,6 +1031,16 @@ export default function EstoqueScreen({ navigation }) {
                         {grupo.nome} {grupo.obrigatorio ? '(obrigatório)' : ''}
                       </Text>
                       <IconButton
+                        icon="tune-variant"
+                        size={18}
+                        iconColor="#2196F3"
+                        onPress={() =>
+                          editMontagemId === grupo.id
+                            ? setEditMontagemId(null)
+                            : abrirEdicaoMontagem(grupo)
+                        }
+                      />
+                      <IconButton
                         icon="delete"
                         size={18}
                         iconColor="#FF5722"
@@ -1007,6 +1051,62 @@ export default function EstoqueScreen({ navigation }) {
                       <Text style={styles.montagemInfo}>
                         Montagem: até {grupo.maxOpcoes} porções • {grupo.porcoesGratis} grátis • +R$ {formatarValor(grupo.valorAdicional)} por adicional
                       </Text>
+                    )}
+                    {editMontagemId === grupo.id && (
+                      <View style={{ marginBottom: 8 }}>
+                        <Chip
+                          selected={montagemEdit.montagem}
+                          onPress={() =>
+                            setMontagemEdit((prev) => ({ ...prev, montagem: !prev.montagem }))
+                          }
+                          style={{ marginBottom: 8, alignSelf: 'flex-start' }}
+                        >
+                          Montagem (vários sabores)
+                        </Chip>
+                        {montagemEdit.montagem && (
+                          <View>
+                            <TextInput
+                              label="Máximo de porções"
+                              value={montagemEdit.maxOpcoes}
+                              onChangeText={(v) => setMontagemEdit((prev) => ({ ...prev, maxOpcoes: v }))}
+                              keyboardType="numeric"
+                              mode="outlined"
+                              dense
+                              style={styles.input}
+                              theme={{ colors: { background: '#2a2a2a' } }}
+                            />
+                            <TextInput
+                              label="Porções grátis"
+                              value={montagemEdit.porcoesGratis}
+                              onChangeText={(v) => setMontagemEdit((prev) => ({ ...prev, porcoesGratis: v }))}
+                              keyboardType="numeric"
+                              mode="outlined"
+                              dense
+                              style={styles.input}
+                              theme={{ colors: { background: '#2a2a2a' } }}
+                            />
+                            <TextInput
+                              label="Valor por porção adicional (R$)"
+                              value={montagemEdit.valorAdicional}
+                              onChangeText={(v) => setMontagemEdit((prev) => ({ ...prev, valorAdicional: v }))}
+                              keyboardType="numeric"
+                              mode="outlined"
+                              dense
+                              style={styles.input}
+                              theme={{ colors: { background: '#2a2a2a' } }}
+                            />
+                          </View>
+                        )}
+                        <Button
+                          compact
+                          mode="contained-tonal"
+                          icon="content-save"
+                          onPress={() => salvarMontagemGrupo(grupo)}
+                          style={{ marginTop: 4, alignSelf: 'flex-start' }}
+                        >
+                          Salvar montagem
+                        </Button>
+                      </View>
                     )}
                     {(grupo.opcoes || []).map((op) => (
                       <Text key={op.id} style={styles.opcaoTexto}>
