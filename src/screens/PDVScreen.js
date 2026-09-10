@@ -1115,7 +1115,7 @@ export default function PDVScreen({ navigation }) {
     carrinho.reduce((total, item) => total + item.value * item.quantidade, 0);
 
   const calcularDesconto = (subtotal) => {
-    const v = parseFloat(descontoValor) || 0;
+    const v = parseFloat(String(descontoValor).replace(',', '.')) || 0;
     if (v <= 0) return 0;
     if (descontoTipo === 'PERCENTUAL') {
       return Math.min((subtotal * v) / 100, subtotal);
