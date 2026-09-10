@@ -84,6 +84,11 @@ export default function EstoqueScreen({ navigation }) {
   const [loadingComp, setLoadingComp] = useState(false);
   const [novaCompNome, setNovaCompNome] = useState('');
   const [novaCompObrigatorio, setNovaCompObrigatorio] = useState(false);
+  // Montagem (ex.: Pastel com vários sabores)
+  const [novaCompMontagem, setNovaCompMontagem] = useState(false);
+  const [novaCompMaxPorcoes, setNovaCompMaxPorcoes] = useState('4');
+  const [novaCompGratis, setNovaCompGratis] = useState('2');
+  const [novaCompAdicional, setNovaCompAdicional] = useState('2.50');
   const [savingComp, setSavingComp] = useState(false);
   const [opcaoBusca, setOpcaoBusca] = useState('');
   const [opcaoGrupoId, setOpcaoGrupoId] = useState(null);
@@ -392,6 +397,10 @@ export default function EstoqueScreen({ navigation }) {
     setCompItem(item);
     setNovaCompNome('');
     setNovaCompObrigatorio(false);
+    setNovaCompMontagem(false);
+    setNovaCompMaxPorcoes('4');
+    setNovaCompGratis('2');
+    setNovaCompAdicional('2.50');
     setOpcaoBusca('');
     setOpcaoGrupoId(null);
     setCompVisible(true);
@@ -418,18 +427,26 @@ export default function EstoqueScreen({ navigation }) {
     }
     setSavingComp(true);
     try {
+      const montagem = novaCompMontagem;
+      const maxP = montagem ? (parseInt(novaCompMaxPorcoes) || 4) : 1;
       await api.post('/api/composicoes', {
         estoqueId: compItem.id,
         nome: novaCompNome.trim(),
         descricao: '',
-        obrigatorio: novaCompObrigatorio,
-        multiplo: false,
-        minOpcoes: novaCompObrigatorio ? 1 : 0,
-        maxOpcoes: 1,
+        obrigatorio: montagem ? true : novaCompObrigatorio,
+        multiplo: montagem,
+        minOpcoes: montagem ? 1 : (novaCompObrigatorio ? 1 : 0),
+        maxOpcoes: maxP,
+        porcoesGratis: montagem ? (parseInt(novaCompGratis) || 0) : 0,
+        valorAdicional: montagem ? (parseFloat(String(novaCompAdicional).replace(',', '.')) || 0) : 0,
         ordem: composicoes.length,
       });
       setNovaCompNome('');
       setNovaCompObrigatorio(false);
+      setNovaCompMontagem(false);
+      setNovaCompMaxPorcoes('4');
+      setNovaCompGratis('2');
+      setNovaCompAdicional('2.50');
       await carregarComposicoes(compItem.id);
     } catch (error) {
       Alert.alert('Erro', error.response?.data?.error || 'Erro ao criar componente');
@@ -986,6 +1003,11 @@ export default function EstoqueScreen({ navigation }) {
                         onPress={() => removerGrupoComponente(grupo.id)}
                       />
                     </View>
+                    {grupo.multiplo && grupo.valorAdicional > 0 && (
+                      <Text style={styles.montagemInfo}>
+                        Montagem: até {grupo.maxOpcoes} porções • {grupo.porcoesGratis} grátis • +R$ {formatarValor(grupo.valorAdicional)} por adicional
+                      </Text>
+                    )}
                     {(grupo.opcoes || []).map((op) => (
                       <Text key={op.id} style={styles.opcaoTexto}>
                         • {op.nome}
@@ -1052,6 +1074,50 @@ export default function EstoqueScreen({ navigation }) {
             >
               Obrigatório
             </Chip>
+            <Chip
+              selected={novaCompMontagem}
+              onPress={() => setNovaCompMontagem(!novaCompMontagem)}
+              style={{ marginBottom: 12, alignSelf: 'flex-start' }}
+            >
+              Montagem (vários sabores)
+            </Chip>
+            {novaCompMontagem && (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={styles.dica}>
+                  Cliente pode finalizar com 1 porção. As primeiras porções são grátis; cada porção além disso soma o valor adicional.
+                </Text>
+                <TextInput
+                  label="Máximo de porções"
+                  value={novaCompMaxPorcoes}
+                  onChangeText={setNovaCompMaxPorcoes}
+                  keyboardType="numeric"
+                  mode="outlined"
+                  dense
+                  style={styles.input}
+                  theme={{ colors: { background: '#2a2a2a' } }}
+                />
+                <TextInput
+                  label="Porções grátis"
+                  value={novaCompGratis}
+                  onChangeText={setNovaCompGratis}
+                  keyboardType="numeric"
+                  mode="outlined"
+                  dense
+                  style={styles.input}
+                  theme={{ colors: { background: '#2a2a2a' } }}
+                />
+                <TextInput
+                  label="Valor por porção adicional (R$)"
+                  value={novaCompAdicional}
+                  onChangeText={setNovaCompAdicional}
+                  keyboardType="numeric"
+                  mode="outlined"
+                  dense
+                  style={styles.input}
+                  theme={{ colors: { background: '#2a2a2a' } }}
+                />
+              </View>
+            )}
             <Button
               mode="contained-tonal"
               icon="plus"
@@ -1428,6 +1494,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     flex: 1,
+  },
+  montagemInfo: {
+    color: '#4CAF50',
+    fontSize: 12,
+    marginBottom: 4,
   },
   opcaoTexto: {
     color: '#ccc',

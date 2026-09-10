@@ -1046,9 +1046,15 @@ export default function PDVScreen({ navigation }) {
     comps.forEach((comp) => {
       const sel = compSelections[comp.id] || [];
       const selectedOpcoes = (comp.opcoes || []).filter((o) => sel.includes(o.id));
-      selectedOpcoes.forEach((o) => {
-        extraTotal += o.valorExtra || 0;
-      });
+      const montagem = comp.multiplo && (comp.valorAdicional || 0) > 0;
+      if (montagem) {
+        const pagas = Math.max(0, selectedOpcoes.length - (comp.porcoesGratis || 0));
+        extraTotal += pagas * (comp.valorAdicional || 0);
+      } else {
+        selectedOpcoes.forEach((o) => {
+          extraTotal += o.valorExtra || 0;
+        });
+      }
       if (selectedOpcoes.length > 0)
         labelParts.push(`${comp.nome}: ${selectedOpcoes.map((o) => o.nome).join(', ')}`);
     });
@@ -3502,6 +3508,8 @@ export default function PDVScreen({ navigation }) {
                 // para simples, basta 1 opção selecionada.
                 const compCompleta = (comp) => {
                   const qtd = (compSelections[comp.id] || []).length;
+                  const montagem = comp.multiplo && (comp.valorAdicional || 0) > 0;
+                  if (montagem) return qtd >= (comp.minOpcoes || 1);
                   return comp.multiplo
                     ? qtd >= (comp.maxOpcoes || 1)
                     : qtd >= 1;
@@ -3520,9 +3528,13 @@ export default function PDVScreen({ navigation }) {
                         {comp.nome}
                         {comp.obrigatorio ? ' *' : ''}
                       </Text>
-                      {comp.multiplo && (
+                      {comp.multiplo && (comp.valorAdicional || 0) > 0 ? (
+                        <Text style={styles.compGroupMulti}>
+                          {(compSelections[comp.id] || []).length}/{comp.maxOpcoes} • {comp.porcoesGratis} grátis • +R$ {formatarValor(comp.valorAdicional)}
+                        </Text>
+                      ) : comp.multiplo ? (
                         <Text style={styles.compGroupMulti}>até {comp.maxOpcoes}</Text>
-                      )}
+                      ) : null}
                     </View>
                     {(comp.opcoes || [])
                       .filter((o) => o.disponivel)
@@ -3563,11 +3575,14 @@ export default function PDVScreen({ navigation }) {
                     (compModalProduct.value || 0) +
                       (compModalProduct.composicoes || []).reduce((sum, comp) => {
                         const sel = compSelections[comp.id] || [];
+                        const selectedOpcoes = (comp.opcoes || []).filter((o) => sel.includes(o.id));
+                        if (comp.multiplo && (comp.valorAdicional || 0) > 0) {
+                          const pagas = Math.max(0, selectedOpcoes.length - (comp.porcoesGratis || 0));
+                          return sum + pagas * (comp.valorAdicional || 0);
+                        }
                         return (
                           sum +
-                          (comp.opcoes || [])
-                            .filter((o) => sel.includes(o.id))
-                            .reduce((s, o) => s + (o.valorExtra || 0), 0)
+                          selectedOpcoes.reduce((s, o) => s + (o.valorExtra || 0), 0)
                         );
                       }, 0)
                   )}
