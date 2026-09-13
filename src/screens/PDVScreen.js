@@ -91,6 +91,7 @@ function OrigemRows({ origens, setOrigens, origensDisponiveis }) {
 export default function PDVScreen({ navigation }) {
   const { user } = useAuth();
   const [produtos, setProdutos] = useState([]);
+  const [estoqueCompleto, setEstoqueCompleto] = useState([]);
   const [selectedProductUnits, setSelectedProductUnits] = useState({});
   const [carrinho, setCarrinho] = useState([]);
   const [busca, setBusca] = useState('');
@@ -250,6 +251,8 @@ export default function PDVScreen({ navigation }) {
   const carregarProdutos = async () => {
     try {
       const response = await api.get('/api/estoque_prod');
+      // Lista completa (todas as unidades) usada para checar conversão de composição.
+      setEstoqueCompleto(response.data || []);
       // Uma linha por produto+unidade. Excluir componentes de composição
       // e unidades ocultas no PDV para o produto.
       const lista = (response.data || []).filter(
@@ -395,7 +398,7 @@ export default function PDVScreen({ navigation }) {
       });
       let msg = 'Vale registrado!';
       if (res.data?.isAdmin && res.data?.despesaPessoal) msg += ' Despesa criada no módulo Pessoal.';
-      if (res.data?.isFuncionario && res.data?.gastoBar) msg += ' Lançado em Gastos Bar (descontado no Ponto).';
+      if (res.data?.gastoBar) msg += ' Lançado em Gastos Bar.';
       Alert.alert('Sucesso', msg);
       setValeValorTotal('');
       setValeOrigens([{ nome: '', valor: '' }]);
@@ -940,6 +943,18 @@ export default function PDVScreen({ navigation }) {
     return produtos.some((item) => item.productId === produto.productId && item.id !== produto.id);
   };
 
+  // Verifica se um ingrediente de composição (unidade zerada) pode ser atendido
+  // por conversão automática de outra unidade do mesmo produto com estoque.
+  const temIrmaoConvertivel = (estoqueOpcao) => {
+    if (!estoqueOpcao || estoqueOpcao.productId == null) return false;
+    return estoqueCompleto.some(
+      (item) =>
+        item.productId === estoqueOpcao.productId &&
+        item.id !== estoqueOpcao.id &&
+        (item.quantity ?? 0) >= 1
+    );
+  };
+
   const adicionarAoCarrinho = (produto) => {
     // Produto com composição (dose / componentes): abre modal de seleção
     if (produto.composicoes && produto.composicoes.length > 0) {
@@ -1030,7 +1045,7 @@ export default function PDVScreen({ navigation }) {
   // Confirma a composição e adiciona o item montado ao carrinho
   const confirmComposicao = () => {
     if (!compModalProduct) return;
-    if (compModalProduct.quantity < 1) {
+    if (compModalProduct.quantity < 1 && !hasConversionSibling(compModalProduct)) {
       Alert.alert('Estoque', `Estoque insuficiente para "${compModalProduct.name}".`);
       return;
     }
@@ -1308,9 +1323,7 @@ export default function PDVScreen({ navigation }) {
           pendenteClientId: tipo === 'fiado' ? clienteFiadoId : null,
         });
         await enviarVenda(body);
-        if (tipo === 'vale') {
-          await registrarGastosBarPorVale();
-        }
+        // Lançamentos do Gastos Bar (vale/desconto) são criados no backend em /api/sales.
       }
 
       Alert.alert('Sucesso', comandaEmPagamento ? 'Comanda paga!' : 'Venda finalizada!');
@@ -2231,9 +2244,15 @@ export default function PDVScreen({ navigation }) {
                         {p.paymentMethod || ''} · {p.date ? new Date(p.date).toLocaleString('pt-BR') : ''}
                       </Text>
                       {(p.items || []).map((it, idx) => (
-                        <Text key={idx} style={styles.pedidoItem}>
-                          {it.quantity}x {it.name}
-                        </Text>
+                        <View key={idx} style={styles.pedidoItemRow}>
+                          <Text style={styles.pedidoItemNome} numberOfLines={2}>
+                            {it.quantity}x {it.name || it.productName}
+                            {it.unit ? ` · ${it.unit}` : ''}
+                          </Text>
+                          <Text style={styles.pedidoItemValor}>
+                            R$ {formatarValor(it.total ?? (it.unitPrice || 0) * (it.quantity || 0))}
+                          </Text>
+                        </View>
                       ))}
                     </Card.Content>
                   </Card>
@@ -3541,7 +3560,7 @@ export default function PDVScreen({ navigation }) {
                       .map((opcao) => {
                         const selected = (compSelections[comp.id] || []).includes(opcao.id);
                         const stockQty = opcao.estoque?.quantity ?? null;
-                        const esgotado = stockQty != null && stockQty <= 0;
+                        const esgotado = stockQty != null && stockQty <= 0 && !temIrmaoConvertivel(opcao.estoque);
                         return (
                           <Chip
                             key={opcao.id}
@@ -4423,6 +4442,24 @@ const styles = StyleSheet.create({
     color: '#bbb',
     fontSize: 13,
     marginTop: 2,
+  },
+  pedidoItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginTop: 2,
+    gap: 8,
+  },
+  pedidoItemNome: {
+    color: '#bbb',
+    fontSize: 13,
+    flex: 1,
+  },
+  pedidoItemValor: {
+    color: '#ddd',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'right',
   },
   pedidoAcoes: {
     flexDirection: 'row',

@@ -171,6 +171,40 @@ export default function ProductListScreen({ navigation }) {
       ? unidadesDoProduto(produtoSelecionado)
       : [...new Set([unitProduto, baseUnitProduto].filter(Boolean))];
 
+  // Inclui também unidades já configuradas manualmente em unitPricesEdit.
+  const unidadesComercializaveisTodas = () =>
+    [...new Set([...unidadesComercializaveis(), ...Object.keys(unitPricesEdit || {})])];
+
+  // Unidades do catálogo global ainda não usadas por este produto (podem ser adicionadas).
+  const unidadesAdicionaveis = () =>
+    unidadesOpcoes().filter((u) => !unidadesComercializaveisTodas().includes(u));
+
+  // Adiciona uma unidade comercializável (pré-preenchida com valores padrão do produto).
+  const adicionarUnidadeComercializavel = (u) => {
+    if (!u) return;
+    setUnitPricesEdit((prev) => {
+      const up = { ...(prev || {}) };
+      if (!up[u]) {
+        const dv = produtoSelecionado?.value != null ? produtoSelecionado.value : (editValue || '');
+        const dc = produtoSelecionado?.valuecusto != null ? produtoSelecionado.valuecusto : (editValueCusto || '');
+        const entry = {};
+        if (dv !== '' && dv != null) entry.value = String(dv);
+        if (dc !== '' && dc != null) entry.cost = String(dc);
+        up[u] = Object.keys(entry).length ? entry : { value: '0' };
+      }
+      return up;
+    });
+  };
+
+  // Remove uma unidade comercializável (limpa venda/custo configurados).
+  const removerUnidadeComercializavel = (u) => {
+    setUnitPricesEdit((prev) => {
+      const up = { ...(prev || {}) };
+      delete up[u];
+      return up;
+    });
+  };
+
   const toggleUnidadePdv = (unit) => {
     setHiddenUnitsEdit((prev) =>
       prev.includes(unit) ? prev.filter((u) => u !== unit) : [...prev, unit]
@@ -992,11 +1026,21 @@ export default function ProductListScreen({ navigation }) {
             Defina o valor de venda e de custo de cada unidade. Serão sugeridos na entrada de estoque.
           </Text>
           <ScrollView style={{ maxHeight: 380 }}>
-            {unidadesComercializaveis().map((u) => {
+            {unidadesComercializaveisTodas().map((u) => {
               const cfg = (unitPricesEdit || {})[u] || {};
+              const podeRemover = !unidadesComercializaveis().includes(u);
               return (
                 <View key={u} style={styles.unitPriceRow}>
-                  <Text style={styles.unitPriceNome}>{u}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Text style={styles.unitPriceNome}>{u}</Text>
+                    <IconButton
+                      icon="close"
+                      size={16}
+                      iconColor="#c0392b"
+                      onPress={() => removerUnidadeComercializavel(u)}
+                      style={{ margin: 0 }}
+                    />
+                  </View>
                   <View style={styles.unitPriceInputs}>
                     <TextInput
                       label="Venda (R$)"
@@ -1020,8 +1064,25 @@ export default function ProductListScreen({ navigation }) {
                 </View>
               );
             })}
-            {unidadesComercializaveis().length === 0 && (
-              <Text style={styles.configVazio}>Dê entrada no estoque para definir valores por unidade.</Text>
+            {unidadesComercializaveisTodas().length === 0 && (
+              <Text style={styles.configVazio}>Dê entrada no estoque ou adicione uma unidade abaixo para definir valores.</Text>
+            )}
+            {unidadesAdicionaveis().length > 0 && (
+              <View style={{ marginTop: 12 }}>
+                <Text style={styles.configVazio}>Adicionar unidade comercializável:</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                  {unidadesAdicionaveis().map((u) => (
+                    <Chip
+                      key={u}
+                      icon="plus"
+                      compact
+                      onPress={() => adicionarUnidadeComercializavel(u)}
+                    >
+                      {u}
+                    </Chip>
+                  ))}
+                </View>
+              </View>
             )}
           </ScrollView>
           <Button

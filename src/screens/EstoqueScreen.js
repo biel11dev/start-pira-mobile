@@ -97,6 +97,8 @@ export default function EstoqueScreen({ navigation }) {
 
   // Unidades fracionais cadastradas (ex.: Dose) — para desmembramento automático
   const [unidadesFracionais, setUnidadesFracionais] = useState([]);
+  // Mapa completo de equivalências de unidade (unitName -> { value, isFractional, fractionalValue })
+  const [equivMap, setEquivMap] = useState({});
 
   useEffect(() => {
     carregarTudo();
@@ -123,6 +125,9 @@ export default function EstoqueScreen({ navigation }) {
           .filter((e) => e.isFractional && e.fractionalValue > 0)
           .map((e) => e.unitName)
       );
+      const emap = {};
+      (eqs.data || []).forEach((e) => { emap[e.unitName] = e; });
+      setEquivMap(emap);
     } catch (error) {
       console.error('❌ Erro ao carregar estoque:', error);
       Alert.alert('Erro', 'Não foi possível carregar o estoque');
@@ -131,11 +136,36 @@ export default function EstoqueScreen({ navigation }) {
     }
   };
 
+  // Existe unidade de medida MAIOR (irmã) do mesmo produto com estoque para conversão?
+  const temConversaoDisponivel = (item) => {
+    if (!item?.productId) return false;
+    const currentEq = equivMap[item.unit];
+    const siblings = estoque.filter(
+      (e) => e.productId === item.productId && e.id !== item.id && (e.quantity ?? 0) >= 1
+    );
+    for (const sib of siblings) {
+      let ratio = null;
+      if (currentEq?.isFractional && currentEq?.fractionalValue > 0) {
+        ratio = currentEq.fractionalValue;
+      } else {
+        const sibEq = equivMap[sib.unit];
+        const currentVal = currentEq?.value || 1;
+        const sibVal = sibEq?.value || 1;
+        if (sibVal > currentVal) ratio = sibVal / currentVal;
+      }
+      if (ratio && ratio > 0) return true;
+    }
+    return false;
+  };
+
   const estaEmFalta = (item) => {
     const qtd = item.quantity ?? 0;
     const min = minimoMap[item.id];
-    if (min != null) return qtd <= min;
-    return qtd <= 0;
+    const emFaltaBase = min != null ? qtd <= min : qtd <= 0;
+    if (!emFaltaBase) return false;
+    // Não está em falta se houver unidade de medida maior disponível para conversão.
+    if (temConversaoDisponivel(item)) return false;
+    return true;
   };
 
   const unidadesDisponiveisEntrada = () => {
