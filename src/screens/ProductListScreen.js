@@ -39,6 +39,8 @@ export default function ProductListScreen({ navigation }) {
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [unitProduto, setUnitProduto] = useState('Unidade');
   const [baseUnitProduto, setBaseUnitProduto] = useState(null);
+  const [unitProdutoFiltro, setUnitProdutoFiltro] = useState('');
+  const [unitBaseFiltro, setUnitBaseFiltro] = useState('');
 
   // Categorias
   const [categorias, setCategorias] = useState([]);
@@ -48,6 +50,7 @@ export default function ProductListScreen({ navigation }) {
   const [hiddenUnitsEdit, setHiddenUnitsEdit] = useState([]);
   const [unitPricesEdit, setUnitPricesEdit] = useState({});
   const [unitPricesModalVisible, setUnitPricesModalVisible] = useState(false);
+  const [unitAddFiltro, setUnitAddFiltro] = useState('');
   const [savingConfig, setSavingConfig] = useState(false);
 
   // Edição do produto (no modal de detalhes)
@@ -305,6 +308,8 @@ export default function ProductListScreen({ navigation }) {
     setSelectedCategoryId(null);
     setUnitProduto('Unidade');
     setBaseUnitProduto(null);
+    setUnitProdutoFiltro('');
+    setUnitBaseFiltro('');
     setUnitPricesEdit({});
     setProdutoSelecionado(null);
   };
@@ -557,8 +562,18 @@ export default function ProductListScreen({ navigation }) {
             />
 
             <Text style={styles.configLabel}>Unidade de Medida:</Text>
+            <TextInput
+              label="Buscar unidade"
+              value={unitProdutoFiltro}
+              onChangeText={setUnitProdutoFiltro}
+              mode="outlined"
+              dense
+              style={styles.input}
+            />
             <View style={styles.configChips}>
-              {unidadesOpcoes().map((u) => (
+              {unidadesOpcoes()
+                .filter((u) => u.toLowerCase().includes(unitProdutoFiltro.toLowerCase()))
+                .map((u) => (
                 <Chip
                   key={u}
                   selected={unitProduto === u}
@@ -571,6 +586,14 @@ export default function ProductListScreen({ navigation }) {
             </View>
 
             <Text style={styles.configLabel}>Unidade base (conversão):</Text>
+            <TextInput
+              label="Buscar unidade"
+              value={unitBaseFiltro}
+              onChangeText={setUnitBaseFiltro}
+              mode="outlined"
+              dense
+              style={styles.input}
+            />
             <View style={styles.configChips}>
               <Chip
                 selected={!baseUnitProduto}
@@ -579,7 +602,9 @@ export default function ProductListScreen({ navigation }) {
               >
                 Automática
               </Chip>
-              {unidadesOpcoes().map((u) => (
+              {unidadesOpcoes()
+                .filter((u) => u.toLowerCase().includes(unitBaseFiltro.toLowerCase()))
+                .map((u) => (
                 <Chip
                   key={u}
                   selected={baseUnitProduto === u}
@@ -1018,7 +1043,7 @@ export default function ProductListScreen({ navigation }) {
         {/* Modal: valores de venda/custo por unidade */}
         <Modal
           visible={unitPricesModalVisible}
-          onDismiss={() => setUnitPricesModalVisible(false)}
+          onDismiss={() => { setUnitPricesModalVisible(false); setUnitAddFiltro(''); }}
           contentContainerStyle={styles.modal}
         >
           <Text style={styles.modalTitle}>Valores por unidade</Text>
@@ -1070,13 +1095,23 @@ export default function ProductListScreen({ navigation }) {
             {unidadesAdicionaveis().length > 0 && (
               <View style={{ marginTop: 12 }}>
                 <Text style={styles.configVazio}>Adicionar unidade comercializável:</Text>
+                <TextInput
+                  label="Buscar unidade"
+                  value={unitAddFiltro}
+                  onChangeText={setUnitAddFiltro}
+                  mode="outlined"
+                  dense
+                  style={[styles.input, { marginTop: 6 }]}
+                />
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
-                  {unidadesAdicionaveis().map((u) => (
+                  {unidadesAdicionaveis()
+                    .filter((u) => u.toLowerCase().includes(unitAddFiltro.toLowerCase()))
+                    .map((u) => (
                     <Chip
                       key={u}
                       icon="plus"
                       compact
-                      onPress={() => adicionarUnidadeComercializavel(u)}
+                      onPress={() => { adicionarUnidadeComercializavel(u); setUnitAddFiltro(''); }}
                     >
                       {u}
                     </Chip>
@@ -1088,7 +1123,7 @@ export default function ProductListScreen({ navigation }) {
           <Button
             mode="contained"
             icon="check"
-            onPress={() => setUnitPricesModalVisible(false)}
+            onPress={() => { setUnitPricesModalVisible(false); setUnitAddFiltro(''); }}
             style={styles.salvarConfigButton}
           >
             Concluir
