@@ -94,6 +94,9 @@ export default function EstoqueScreen({ navigation }) {
   const [savingComp, setSavingComp] = useState(false);
   const [opcaoBusca, setOpcaoBusca] = useState('');
   const [opcaoGrupoId, setOpcaoGrupoId] = useState(null);
+  const [novaOpcaoValorExtra, setNovaOpcaoValorExtra] = useState('0');
+  const [editOpcaoId, setEditOpcaoId] = useState(null);
+  const [editOpcaoValor, setEditOpcaoValor] = useState('0');
 
   // Unidades fracionais cadastradas (ex.: Dose) — para desmembramento automático
   const [unidadesFracionais, setUnidadesFracionais] = useState([]);
@@ -435,6 +438,9 @@ export default function EstoqueScreen({ navigation }) {
     setNovaCompAdicional('2.50');
     setOpcaoBusca('');
     setOpcaoGrupoId(null);
+    setNovaOpcaoValorExtra('0');
+    setEditOpcaoId(null);
+    setEditOpcaoValor('0');
     setCompVisible(true);
     await carregarComposicoes(item.id);
   };
@@ -547,13 +553,15 @@ export default function EstoqueScreen({ navigation }) {
   const adicionarOpcaoComponente = async (grupoId, estoqueOpcao) => {
     try {
       const alvo = resolverAlvoFracional(estoqueOpcao);
+      const valorExtra = parseFloat(String(novaOpcaoValorExtra).replace(',', '.')) || 0;
       await api.post(`/api/composicoes/${grupoId}/opcoes`, {
         nome: alvo.name,
-        valorExtra: 0,
+        valorExtra,
         estoqueId: alvo.id,
       });
       setOpcaoBusca('');
       setOpcaoGrupoId(null);
+      setNovaOpcaoValorExtra('0');
       await carregarComposicoes(compItem.id);
       if (alvo.id !== estoqueOpcao.id) {
         Alert.alert(
@@ -563,6 +571,33 @@ export default function EstoqueScreen({ navigation }) {
       }
     } catch (error) {
       Alert.alert('Erro', error.response?.data?.error || 'Erro ao adicionar opção');
+    }
+  };
+
+  // Regra de cobrança por componente específico (valorExtra da opção)
+  const abrirEdicaoOpcaoValor = (opcao) => {
+    setEditOpcaoId(opcao.id);
+    setEditOpcaoValor(opcao.valorExtra != null ? String(opcao.valorExtra) : '0');
+  };
+
+  const salvarValorExtraOpcao = async (opcao) => {
+    try {
+      const valorExtra = parseFloat(String(editOpcaoValor).replace(',', '.')) || 0;
+      await api.put(`/api/composicoes/opcoes/${opcao.id}`, { valorExtra });
+      setEditOpcaoId(null);
+      await carregarComposicoes(compItem.id);
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao salvar valor adicional');
+    }
+  };
+
+  const removerOpcaoComponente = async (opcaoId) => {
+    try {
+      await api.delete(`/api/composicoes/opcoes/${opcaoId}`);
+      if (editOpcaoId === opcaoId) setEditOpcaoId(null);
+      await carregarComposicoes(compItem.id);
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao remover opção');
     }
   };
 
@@ -685,12 +720,12 @@ export default function EstoqueScreen({ navigation }) {
                           </Button>
                           <Button
                             compact
-                            mode="text"
-                            icon="puzzle"
-                            textColor="#FF9800"
+                            mode={produto.composicoes?.length ? 'contained-tonal' : 'text'}
+                            icon={produto.composicoes?.length ? 'puzzle-check' : 'puzzle'}
+                            textColor={produto.composicoes?.length ? '#FF9800' : '#777'}
                             onPress={() => abrirComponente(produto)}
                           >
-                            Componente
+                            {produto.composicoes?.length ? `Componente (${produto.composicoes.length})` : 'Componente'}
                           </Button>
                           <Button
                             compact
@@ -1139,19 +1174,58 @@ export default function EstoqueScreen({ navigation }) {
                       </View>
                     )}
                     {(grupo.opcoes || []).map((op) => (
-                      <Text key={op.id} style={styles.opcaoTexto}>
-                        • {op.nome}
-                        {op.valorExtra ? ` (+R$ ${formatarValor(op.valorExtra)})` : ''}
-                      </Text>
+                      <View key={op.id}>
+                        <View style={styles.opcaoRow}>
+                          <Text style={styles.opcaoTexto}>
+                            • {op.nome}
+                            {op.valorExtra ? ` (+R$ ${formatarValor(op.valorExtra)})` : ''}
+                          </Text>
+                          <View style={{ flexDirection: 'row' }}>
+                            <IconButton
+                              icon="currency-usd"
+                              size={16}
+                              iconColor="#4CAF50"
+                              onPress={() =>
+                                editOpcaoId === op.id ? setEditOpcaoId(null) : abrirEdicaoOpcaoValor(op)
+                              }
+                            />
+                            <IconButton
+                              icon="delete-outline"
+                              size={16}
+                              iconColor="#FF5722"
+                              onPress={() => removerOpcaoComponente(op.id)}
+                            />
+                          </View>
+                        </View>
+                        {editOpcaoId === op.id && (
+                          <View style={styles.opcaoEditRow}>
+                            <TextInput
+                              label="Valor adicional (R$)"
+                              value={editOpcaoValor}
+                              onChangeText={setEditOpcaoValor}
+                              keyboardType="numeric"
+                              mode="outlined"
+                              dense
+                              style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                              theme={{ colors: { background: '#2a2a2a' } }}
+                            />
+                            <Button compact mode="contained-tonal" onPress={() => salvarValorExtraOpcao(op)}>
+                              Salvar
+                            </Button>
+                          </View>
+                        )}
+                      </View>
                     ))}
                     <Button
                       compact
                       mode="text"
                       icon="plus"
                       textColor="#2196F3"
-                      onPress={() =>
-                        setOpcaoGrupoId(opcaoGrupoId === grupo.id ? null : grupo.id)
-                      }
+                      onPress={() => {
+                        const abrindo = opcaoGrupoId !== grupo.id;
+                        setOpcaoGrupoId(abrindo ? grupo.id : null);
+                        setNovaOpcaoValorExtra('0');
+                      }}
                     >
                       Adicionar opção
                     </Button>
@@ -1161,6 +1235,16 @@ export default function EstoqueScreen({ navigation }) {
                           label="Buscar item do estoque"
                           value={opcaoBusca}
                           onChangeText={setOpcaoBusca}
+                          mode="outlined"
+                          dense
+                          style={styles.input}
+                          theme={{ colors: { background: '#2a2a2a' } }}
+                        />
+                        <TextInput
+                          label="Valor adicional deste componente (R$)"
+                          value={novaOpcaoValorExtra}
+                          onChangeText={setNovaOpcaoValorExtra}
+                          keyboardType="numeric"
                           mode="outlined"
                           dense
                           style={styles.input}
@@ -1634,5 +1718,17 @@ const styles = StyleSheet.create({
     color: '#ccc',
     fontSize: 13,
     marginVertical: 2,
+    flex: 1,
+  },
+  opcaoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  opcaoEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
   },
 });
