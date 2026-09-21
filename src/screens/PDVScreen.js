@@ -612,10 +612,14 @@ export default function PDVScreen({ navigation }) {
     }
   };
   const toggleCupom = async (id, ativo) => {
-    try { await api.put(`/api/pdv-cupons/${id}`, { ativo: !ativo }); carregarCupons(); } catch (e) {}
+    try { await api.put(`/api/pdv-cupons/${id}`, { ativo: !ativo }); carregarCupons(); } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao atualizar cupom');
+    }
   };
   const excluirCupom = async (id) => {
-    try { await api.delete(`/api/pdv-cupons/${id}`); carregarCupons(); } catch (e) {}
+    try { await api.delete(`/api/pdv-cupons/${id}`); carregarCupons(); } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao excluir cupom');
+    }
   };
 
   const criarTaxa = async () => {
@@ -632,10 +636,14 @@ export default function PDVScreen({ navigation }) {
     }
   };
   const toggleTaxa = async (id, ativo) => {
-    try { await api.put(`/api/pdv-taxas/${id}`, { ativo: !ativo }); carregarTaxas(); } catch (e) {}
+    try { await api.put(`/api/pdv-taxas/${id}`, { ativo: !ativo }); carregarTaxas(); } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao atualizar taxa');
+    }
   };
   const excluirTaxa = async (id) => {
-    try { await api.delete(`/api/pdv-taxas/${id}`); carregarTaxas(); } catch (e) {}
+    try { await api.delete(`/api/pdv-taxas/${id}`); carregarTaxas(); } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao excluir taxa');
+    }
   };
 
   const salvarLimite = async (chave, valor, descricao) => {
@@ -664,14 +672,18 @@ export default function PDVScreen({ navigation }) {
       await api.put(`/api/pdv-formas-pagamento/${id}`, { ativo: !ativo });
       carregarFormasConfig();
       carregarFormasPagamento();
-    } catch (e) {}
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao atualizar forma de pagamento');
+    }
   };
   const excluirFormaConfig = async (id) => {
     try {
       await api.delete(`/api/pdv-formas-pagamento/${id}`);
       carregarFormasConfig();
       carregarFormasPagamento();
-    } catch (e) {}
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao excluir forma de pagamento');
+    }
   };
 
   const salvarTaxaSaque = async () => {
@@ -1436,7 +1448,7 @@ export default function PDVScreen({ navigation }) {
       try {
         await api.post(`/api/point/orders/${orderId}/cancel`, {});
       } catch (e) {
-        /* ignora */
+        Alert.alert('Atenção', 'Não foi possível confirmar o cancelamento na máquina. Verifique o terminal antes de tentar novamente.');
       }
     }
     setPointVisible(false);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+import { View, StyleSheet, ScrollView, RefreshControl, Alert } from 'react-native';
 import {
   Appbar,
   Card,
@@ -39,6 +39,7 @@ export default function ListaComprasScreen({ navigation }) {
       carregarLista();
     } catch (error) {
       console.error('Erro ao concluir item:', error);
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao concluir item');
     }
   };
 
@@ -48,6 +49,7 @@ export default function ListaComprasScreen({ navigation }) {
       carregarLista();
     } catch (error) {
       console.error('Erro ao reabrir item:', error);
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao reabrir item');
     }
   };
 
