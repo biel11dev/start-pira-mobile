@@ -971,10 +971,20 @@ export default function PDVScreen({ navigation }) {
     );
   };
 
+  // Componentes marcados como base já entram selecionados e não podem ser removidos.
+  const selecoesIniciais = (produto) => {
+    const iniciais = {};
+    (produto.composicoes || []).forEach((comp) => {
+      const bases = (comp.opcoes || []).filter((o) => o.base && o.disponivel);
+      if (bases.length > 0) iniciais[comp.id] = bases.map((o) => ({ id: o.id, qtd: 1 }));
+    });
+    return iniciais;
+  };
+
   const adicionarAoCarrinho = (produto) => {
     // Produto com composição (dose / componentes): abre modal de seleção
     if (produto.composicoes && produto.composicoes.length > 0) {
-      setCompSelections({});
+      setCompSelections(selecoesIniciais(produto));
       setCompModalProduct(produto);
       return;
     }
@@ -1069,7 +1079,12 @@ export default function PDVScreen({ navigation }) {
     return !!opcao.exclusivo;
   };
 
+  // Itens base ocupam quota mas não exigem ação do operador.
+  const grupoSoTemBase = (comp) =>
+    (comp.opcoes || []).filter((o) => o.disponivel).every((o) => o.base);
+
   const alterarQtdOpcao = (comp, opcao, delta) => {
+    if (opcao.base && delta < 0) return; // item base do combo não pode ser removido
     setCompSelections((prev) => {
       const atual = prev[comp.id] || [];
       const existente = atual.find((s) => s.id === opcao.id);
@@ -1102,6 +1117,7 @@ export default function PDVScreen({ navigation }) {
 
   // Alterna uma opção dentro de uma composição (grupos sem quantidade)
   const toggleCompOpcao = (comp, opcao) => {
+    if (opcao.base) return; // item base do combo é fixo
     const { id: composicaoId, multiplo, maxOpcoes } = comp;
     setCompSelections((prev) => {
       const atual = prev[composicaoId] || [];
@@ -1120,6 +1136,7 @@ export default function PDVScreen({ navigation }) {
   // Um grupo está completo quando atende o mínimo/quota exigida
   const grupoCompleto = (comp) => {
     const usada = quotaUsada(comp);
+    if (grupoSoTemBase(comp)) return true;
     if (usada === 0) return false;
     if (comp.exigeTotalExato) return usada >= (comp.maxOpcoes || 1);
     const montagem = comp.multiplo && (comp.valorAdicional || 0) > 0;
@@ -3677,6 +3694,7 @@ export default function PDVScreen({ navigation }) {
                                   ]}
                                 >
                                   {opcao.nome}
+                                  {opcao.base ? ' • incluso' : ''}
                                   {opcao.valorExtra > 0
                                     ? ` (+R$ ${formatarValor(opcao.valorExtra)})`
                                     : ''}
@@ -3690,7 +3708,7 @@ export default function PDVScreen({ navigation }) {
                                 icon="minus"
                                 size={18}
                                 mode="contained-tonal"
-                                disabled={qtd <= 0}
+                                disabled={qtd <= 0 || opcao.base}
                                 onPress={() => alterarQtdOpcao(comp, opcao, -1)}
                               />
                               <Text style={styles.compQtdValor}>{qtd}</Text>
@@ -3709,7 +3727,7 @@ export default function PDVScreen({ navigation }) {
                           <Chip
                             key={opcao.id}
                             selected={qtd > 0}
-                            disabled={esgotado || bloqueada}
+                            disabled={esgotado || bloqueada || opcao.base}
                             onPress={() =>
                               !esgotado && !bloqueada && toggleCompOpcao(comp, opcao)
                             }
@@ -3717,6 +3735,7 @@ export default function PDVScreen({ navigation }) {
                             showSelectedCheck
                           >
                             {opcao.nome}
+                            {opcao.base ? ' • incluso' : ''}
                             {opcao.exclusivo ? ` (ocupa ${consumo})` : ''}
                             {opcao.valorExtra > 0
                               ? ` (+R$ ${formatarValor(opcao.valorExtra)})`

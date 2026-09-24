@@ -98,6 +98,7 @@ export default function EstoqueScreen({ navigation }) {
   const [editOpcaoId, setEditOpcaoId] = useState(null);
   const [editOpcaoValor, setEditOpcaoValor] = useState('0');
   const [novaOpcaoExclusiva, setNovaOpcaoExclusiva] = useState(false);
+  const [novaOpcaoBase, setNovaOpcaoBase] = useState(false);
   const [novaOpcaoConsumo, setNovaOpcaoConsumo] = useState('1');
 
   // Combo (variação de venda: conjunto de produtos vendidos juntos)
@@ -548,6 +549,9 @@ export default function EstoqueScreen({ navigation }) {
   // (ex.: Dose), redireciona a opção para a unidade fracional. O desmembramento
   // é feito sob demanda na venda (conversão automática da unidade irmã).
   const resolverAlvoFracional = (item) => {
+    // Em variações de venda (combo) a unidade escolhida é a que vale:
+    // vincular "Garrafa" deve manter Garrafa, e não virar a Dose irmã.
+    if (compItem?.isCombo) return item;
     const ehFracional = (u) => unidadesFracionais.includes(u);
     if (ehFracional(item.unit)) return item; // já é fracional
     const irmaoFracional = estoque.find(
@@ -568,12 +572,14 @@ export default function EstoqueScreen({ navigation }) {
         valorExtra,
         estoqueId: alvo.id,
         exclusivo: novaOpcaoExclusiva,
+        base: novaOpcaoBase,
         consomeQtd: parseInt(novaOpcaoConsumo, 10) || 1,
       });
       setOpcaoBusca('');
       setOpcaoGrupoId(null);
       setNovaOpcaoValorExtra('0');
       setNovaOpcaoExclusiva(false);
+      setNovaOpcaoBase(false);
       setNovaOpcaoConsumo('1');
       await carregarComposicoes(compItem.id);
       if (alvo.id !== estoqueOpcao.id) {
@@ -676,6 +682,16 @@ export default function EstoqueScreen({ navigation }) {
       await carregarComposicoes(compItem.id);
     } catch (error) {
       Alert.alert('Erro', error.response?.data?.error || 'Erro ao salvar exclusividade');
+    }
+  };
+
+  // Item base da variação: já vem selecionado no PDV e não pode ser removido
+  const alternarOpcaoBase = async (opcao) => {
+    try {
+      await api.put(`/api/composicoes/opcoes/${opcao.id}`, { base: !opcao.base });
+      await carregarComposicoes(compItem.id);
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao salvar item base');
     }
   };
 
@@ -1299,10 +1315,17 @@ export default function EstoqueScreen({ navigation }) {
                           <Text style={styles.opcaoTexto}>
                             • {op.nome}
                             {op.valorExtra ? ` (+R$ ${formatarValor(op.valorExtra)})` : ''}
+                            {op.base ? ' • base' : ''}
                             {op.exclusivo ? ' • exclusiva' : ''}
                             {(op.consomeQtd || 1) > 1 ? ` • ocupa ${op.consomeQtd}` : ''}
                           </Text>
                           <View style={{ flexDirection: 'row' }}>
+                            <IconButton
+                              icon={op.base ? 'star' : 'star-outline'}
+                              size={16}
+                              iconColor={op.base ? '#FFD54F' : '#777'}
+                              onPress={() => alternarOpcaoBase(op)}
+                            />
                             <IconButton
                               icon={op.exclusivo ? 'lock' : 'lock-open-variant-outline'}
                               size={16}
@@ -1396,6 +1419,14 @@ export default function EstoqueScreen({ navigation }) {
                           theme={{ colors: { background: '#2a2a2a' } }}
                         />
                         <View style={styles.regraChips}>
+                          <Chip
+                            compact
+                            selected={novaOpcaoBase}
+                            onPress={() => setNovaOpcaoBase(!novaOpcaoBase)}
+                            style={styles.regraChip}
+                          >
+                            Item base (já incluso)
+                          </Chip>
                           <Chip
                             compact
                             selected={novaOpcaoExclusiva}
