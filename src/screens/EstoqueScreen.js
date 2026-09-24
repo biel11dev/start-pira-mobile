@@ -97,6 +97,15 @@ export default function EstoqueScreen({ navigation }) {
   const [novaOpcaoValorExtra, setNovaOpcaoValorExtra] = useState('0');
   const [editOpcaoId, setEditOpcaoId] = useState(null);
   const [editOpcaoValor, setEditOpcaoValor] = useState('0');
+  const [novaOpcaoExclusiva, setNovaOpcaoExclusiva] = useState(false);
+  const [novaOpcaoConsumo, setNovaOpcaoConsumo] = useState('1');
+
+  // Combo (variação de venda: conjunto de produtos vendidos juntos)
+  const [comboVisible, setComboVisible] = useState(false);
+  const [comboItem, setComboItem] = useState(null);
+  const [comboAtivo, setComboAtivo] = useState(false);
+  const [comboNome, setComboNome] = useState('');
+  const [savingCombo, setSavingCombo] = useState(false);
 
   // Unidades fracionais cadastradas (ex.: Dose) — para desmembramento automático
   const [unidadesFracionais, setUnidadesFracionais] = useState([]);
@@ -558,10 +567,14 @@ export default function EstoqueScreen({ navigation }) {
         nome: alvo.name,
         valorExtra,
         estoqueId: alvo.id,
+        exclusivo: novaOpcaoExclusiva,
+        consomeQtd: parseInt(novaOpcaoConsumo, 10) || 1,
       });
       setOpcaoBusca('');
       setOpcaoGrupoId(null);
       setNovaOpcaoValorExtra('0');
+      setNovaOpcaoExclusiva(false);
+      setNovaOpcaoConsumo('1');
       await carregarComposicoes(compItem.id);
       if (alvo.id !== estoqueOpcao.id) {
         Alert.alert(
@@ -598,6 +611,80 @@ export default function EstoqueScreen({ navigation }) {
       await carregarComposicoes(compItem.id);
     } catch (error) {
       Alert.alert('Erro', error.response?.data?.error || 'Erro ao remover opção');
+    }
+  };
+
+  // ===== Combo (variação de venda) =====
+  const abrirCombo = (item) => {
+    setComboItem(item);
+    setComboAtivo(!!item.isCombo);
+    setComboNome(item.comboNome || item.unit || 'Combo');
+    setComboVisible(true);
+  };
+
+  const salvarCombo = async () => {
+    if (!comboItem) return;
+    setSavingCombo(true);
+    try {
+      await api.patch(`/api/estoque_prod/${comboItem.id}/combo`, {
+        isCombo: comboAtivo,
+        comboNome: comboAtivo ? comboNome.trim() || 'Combo' : null,
+      });
+      Alert.alert(
+        'Sucesso',
+        comboAtivo
+          ? 'Variação de venda ativada. O disponível passa a ser calculado pelos componentes.'
+          : 'Variação de venda desativada.'
+      );
+      setComboVisible(false);
+      carregarTudo();
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao salvar variação de venda');
+    } finally {
+      setSavingCombo(false);
+    }
+  };
+
+  // Alterna a regra de quantidade por opção de um grupo (ex.: 2x Coco + 2x Maracujá)
+  const alternarRegraQuantidade = async (grupo, campo) => {
+    try {
+      await api.put(`/api/composicoes/${grupo.id}`, {
+        nome: grupo.nome,
+        descricao: grupo.descricao || '',
+        obrigatorio: grupo.obrigatorio,
+        multiplo: campo === 'permiteQuantidade' ? true : grupo.multiplo,
+        minOpcoes: grupo.minOpcoes || 1,
+        maxOpcoes: grupo.maxOpcoes || 1,
+        porcoesGratis: grupo.porcoesGratis || 0,
+        valorAdicional: grupo.valorAdicional || 0,
+        ordem: grupo.ordem || 0,
+        permiteQuantidade:
+          campo === 'permiteQuantidade' ? !grupo.permiteQuantidade : grupo.permiteQuantidade,
+        exigeTotalExato:
+          campo === 'exigeTotalExato' ? !grupo.exigeTotalExato : grupo.exigeTotalExato,
+      });
+      await carregarComposicoes(compItem.id);
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao salvar regra do grupo');
+    }
+  };
+
+  // Marca uma opção como exclusiva (ex.: Vibe 2L fecha o grupo sozinha)
+  const alternarOpcaoExclusiva = async (opcao) => {
+    try {
+      await api.put(`/api/composicoes/opcoes/${opcao.id}`, { exclusivo: !opcao.exclusivo });
+      await carregarComposicoes(compItem.id);
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao salvar exclusividade');
+    }
+  };
+
+  const salvarConsumoOpcao = async (opcao, consomeQtd) => {
+    try {
+      await api.put(`/api/composicoes/opcoes/${opcao.id}`, { consomeQtd });
+      await carregarComposicoes(compItem.id);
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao salvar consumo');
     }
   };
 
@@ -685,13 +772,19 @@ export default function EstoqueScreen({ navigation }) {
                           </View>
                           <Chip
                             mode="outlined"
-                            icon="package-variant"
+                            icon={produto.isCombo ? 'package-variant-closed' : 'package-variant'}
                             style={[styles.estoqueChip, emFalta ? styles.estoqueBaixo : {}]}
                             textStyle={{ color: emFalta ? '#FF5722' : '#2196F3' }}
                           >
-                            {produto.quantity} {produto.unit}
+                            {produto.quantity} {produto.isCombo ? produto.comboNome || 'Combo' : produto.unit}
                           </Chip>
                         </View>
+
+                        {produto.isCombo && (
+                          <Text style={styles.comboInfo}>
+                            Variação de venda — disponível calculado pelos componentes
+                          </Text>
+                        )}
 
                         {min != null && (
                           <Text style={styles.idealTexto}>Quantidade ideal: {min}</Text>
@@ -717,6 +810,15 @@ export default function EstoqueScreen({ navigation }) {
                             onPress={() => abrirConversao(produto)}
                           >
                             Conversão
+                          </Button>
+                          <Button
+                            compact
+                            mode={produto.isCombo ? 'contained-tonal' : 'text'}
+                            icon="package-variant-closed"
+                            textColor={produto.isCombo ? '#CE93D8' : '#777'}
+                            onPress={() => abrirCombo(produto)}
+                          >
+                            {produto.isCombo ? produto.comboNome || 'Combo' : 'Variação'}
                           </Button>
                           <Button
                             compact
@@ -1117,6 +1219,24 @@ export default function EstoqueScreen({ navigation }) {
                         Montagem: até {grupo.maxOpcoes} porções • {grupo.porcoesGratis} grátis • +R$ {formatarValor(grupo.valorAdicional)} por adicional
                       </Text>
                     )}
+                    <View style={styles.regraChips}>
+                      <Chip
+                        compact
+                        selected={!!grupo.permiteQuantidade}
+                        onPress={() => alternarRegraQuantidade(grupo, 'permiteQuantidade')}
+                        style={styles.regraChip}
+                      >
+                        Quantidade por opção
+                      </Chip>
+                      <Chip
+                        compact
+                        selected={!!grupo.exigeTotalExato}
+                        onPress={() => alternarRegraQuantidade(grupo, 'exigeTotalExato')}
+                        style={styles.regraChip}
+                      >
+                        Exigir {grupo.maxOpcoes} exatos
+                      </Chip>
+                    </View>
                     {editMontagemId === grupo.id && (
                       <View style={{ marginBottom: 8 }}>
                         <Chip
@@ -1179,8 +1299,16 @@ export default function EstoqueScreen({ navigation }) {
                           <Text style={styles.opcaoTexto}>
                             • {op.nome}
                             {op.valorExtra ? ` (+R$ ${formatarValor(op.valorExtra)})` : ''}
+                            {op.exclusivo ? ' • exclusiva' : ''}
+                            {(op.consomeQtd || 1) > 1 ? ` • ocupa ${op.consomeQtd}` : ''}
                           </Text>
                           <View style={{ flexDirection: 'row' }}>
+                            <IconButton
+                              icon={op.exclusivo ? 'lock' : 'lock-open-variant-outline'}
+                              size={16}
+                              iconColor={op.exclusivo ? '#CE93D8' : '#777'}
+                              onPress={() => alternarOpcaoExclusiva(op)}
+                            />
                             <IconButton
                               icon="currency-usd"
                               size={16}
@@ -1198,20 +1326,37 @@ export default function EstoqueScreen({ navigation }) {
                           </View>
                         </View>
                         {editOpcaoId === op.id && (
-                          <View style={styles.opcaoEditRow}>
-                            <TextInput
-                              label="Valor adicional (R$)"
-                              value={editOpcaoValor}
-                              onChangeText={setEditOpcaoValor}
-                              keyboardType="numeric"
-                              mode="outlined"
-                              dense
-                              style={[styles.input, { flex: 1, marginBottom: 0 }]}
-                              theme={{ colors: { background: '#2a2a2a' } }}
-                            />
-                            <Button compact mode="contained-tonal" onPress={() => salvarValorExtraOpcao(op)}>
-                              Salvar
-                            </Button>
+                          <View>
+                            <View style={styles.opcaoEditRow}>
+                              <TextInput
+                                label="Valor adicional (R$)"
+                                value={editOpcaoValor}
+                                onChangeText={setEditOpcaoValor}
+                                keyboardType="numeric"
+                                mode="outlined"
+                                dense
+                                style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                                theme={{ colors: { background: '#2a2a2a' } }}
+                              />
+                              <Button compact mode="contained-tonal" onPress={() => salvarValorExtraOpcao(op)}>
+                                Salvar
+                              </Button>
+                            </View>
+                            <View style={styles.opcaoEditRow}>
+                              <Text style={styles.dica}>Ocupa da quota:</Text>
+                              <IconButton
+                                icon="minus"
+                                size={16}
+                                disabled={(op.consomeQtd || 1) <= 1}
+                                onPress={() => salvarConsumoOpcao(op, (op.consomeQtd || 1) - 1)}
+                              />
+                              <Text style={styles.opcaoTexto}>{op.consomeQtd || 1}</Text>
+                              <IconButton
+                                icon="plus"
+                                size={16}
+                                onPress={() => salvarConsumoOpcao(op, (op.consomeQtd || 1) + 1)}
+                              />
+                            </View>
                           </View>
                         )}
                       </View>
@@ -1244,6 +1389,26 @@ export default function EstoqueScreen({ navigation }) {
                           label="Valor adicional deste componente (R$)"
                           value={novaOpcaoValorExtra}
                           onChangeText={setNovaOpcaoValorExtra}
+                          keyboardType="numeric"
+                          mode="outlined"
+                          dense
+                          style={styles.input}
+                          theme={{ colors: { background: '#2a2a2a' } }}
+                        />
+                        <View style={styles.regraChips}>
+                          <Chip
+                            compact
+                            selected={novaOpcaoExclusiva}
+                            onPress={() => setNovaOpcaoExclusiva(!novaOpcaoExclusiva)}
+                            style={styles.regraChip}
+                          >
+                            Exclusiva (fecha o grupo)
+                          </Chip>
+                        </View>
+                        <TextInput
+                          label="Ocupa quanto da quota (ex.: 2L ocupa 4)"
+                          value={novaOpcaoConsumo}
+                          onChangeText={setNovaOpcaoConsumo}
                           keyboardType="numeric"
                           mode="outlined"
                           dense
@@ -1350,6 +1515,69 @@ export default function EstoqueScreen({ navigation }) {
             >
               Fechar
             </Button>
+          </ScrollView>
+        </Modal>
+
+        {/* ===== Modal: Variação de venda (combo) ===== */}
+        <Modal
+          visible={comboVisible}
+          onDismiss={() => setComboVisible(false)}
+          contentContainerStyle={styles.modal}
+        >
+          <ScrollView>
+            <Text style={styles.modalTitle}>Variação de Venda</Text>
+            {comboItem && (
+              <Text style={styles.dica}>
+                {comboItem.name} — {comboItem.unit}
+              </Text>
+            )}
+            <Chip
+              selected={comboAtivo}
+              onPress={() => setComboAtivo(!comboAtivo)}
+              style={{ marginBottom: 12, alignSelf: 'flex-start' }}
+            >
+              Esta unidade é uma variação de venda
+            </Chip>
+            <Text style={styles.dica}>
+              Ative quando a "unidade" na verdade for um conjunto vendido junto (ex.: Combo).
+              O estoque deixa de ser próprio e passa a ser calculado pelos componentes:
+              menor razão entre o estoque de cada grupo obrigatório e a quota exigida.
+            </Text>
+            {comboAtivo && (
+              <TextInput
+                label="Nome da variação (ex.: Combo)"
+                value={comboNome}
+                onChangeText={setComboNome}
+                mode="outlined"
+                style={styles.input}
+                theme={{ colors: { background: '#2a2a2a' } }}
+              />
+            )}
+            {comboAtivo && (
+              <Text style={styles.dica}>
+                Configure os grupos e as regras em "Componente": quantidade por opção,
+                total exato e opções exclusivas (ex.: 2L bloqueia as latas).
+              </Text>
+            )}
+            <View style={styles.modalButtons}>
+              <Button
+                mode="outlined"
+                onPress={() => setComboVisible(false)}
+                style={styles.modalButton}
+                textColor="#fff"
+              >
+                Cancelar
+              </Button>
+              <Button
+                mode="contained"
+                onPress={salvarCombo}
+                loading={savingCombo}
+                disabled={savingCombo}
+                style={styles.modalButton}
+              >
+                Salvar
+              </Button>
+            </View>
           </ScrollView>
         </Modal>
 
@@ -1730,5 +1958,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginBottom: 8,
+  },
+  comboInfo: {
+    color: '#CE93D8',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  regraChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 8,
+  },
+  regraChip: {
+    marginRight: 6,
   },
 });

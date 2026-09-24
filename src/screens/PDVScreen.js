@@ -253,11 +253,11 @@ export default function PDVScreen({ navigation }) {
       const response = await api.get('/api/estoque_prod');
       // Lista completa (todas as unidades) usada para checar conversão de composição.
       setEstoqueCompleto(response.data || []);
-      // Uma linha por produto+unidade. Excluir componentes de composição
-      // e unidades ocultas no PDV para o produto.
+      // Uma linha por produto+unidade. Um item pode ser componente de combo e
+      // continuar vendível avulso — quem decide é o `mostrarPdv` do cadastro.
       const lista = (response.data || []).filter(
         (p) =>
-          !(p._count?.composicaoOpcoes > 0) &&
+          p.mostrarPdv !== false &&
           !((p.product?.pdvHiddenUnits || []).includes(p.unit))
       );
       setProdutos(lista);
@@ -955,6 +955,10 @@ export default function PDVScreen({ navigation }) {
     return produtos.some((item) => item.productId === produto.productId && item.id !== produto.id);
   };
 
+  // Combos usam o rótulo da variação de venda no lugar da unidade de medida.
+  const rotuloUnidade = (produto) =>
+    produto?.isCombo ? produto.comboNome || produto.unit : produto?.unit;
+
   // Verifica se um ingrediente de composição (unidade zerada) pode ser atendido
   // por conversão automática de outra unidade do mesmo produto com estoque.
   const temIrmaoConvertivel = (estoqueOpcao) => {
@@ -1040,18 +1044,101 @@ export default function PDVScreen({ navigation }) {
     }
   };
 
-  // Alterna uma opção dentro de uma composição
-  const toggleCompOpcao = (composicaoId, opcaoId, multiplo, maxOpcoes) => {
+  // Seleções de composição: { [composicaoId]: [{ id, qtd }] }
+  const selecoesDoGrupo = (composicaoId) => compSelections[composicaoId] || [];
+
+  const qtdSelecionada = (composicaoId, opcaoId) =>
+    selecoesDoGrupo(composicaoId).find((s) => s.id === opcaoId)?.qtd || 0;
+
+  // Quota do grupo já consumida (uma opção exclusiva consome a quota inteira).
+  const quotaUsada = (comp) =>
+    selecoesDoGrupo(comp.id).reduce((soma, s) => {
+      const opcao = (comp.opcoes || []).find((o) => o.id === s.id);
+      return soma + s.qtd * Math.max(1, opcao?.consomeQtd || 1);
+    }, 0);
+
+  // Uma opção fica bloqueada quando conflita com o que já foi escolhido:
+  // exclusiva com algo selecionado, ou comum com uma exclusiva ativa.
+  const opcaoBloqueada = (comp, opcao) => {
+    const sel = selecoesDoGrupo(comp.id);
+    if (sel.length === 0) return false;
+    const temExclusivaAtiva = sel.some(
+      (s) => (comp.opcoes || []).find((o) => o.id === s.id)?.exclusivo
+    );
+    if (temExclusivaAtiva) return !sel.some((s) => s.id === opcao.id);
+    return !!opcao.exclusivo;
+  };
+
+  const alterarQtdOpcao = (comp, opcao, delta) => {
     setCompSelections((prev) => {
-      const current = prev[composicaoId] || [];
-      if (current.includes(opcaoId)) {
-        return { ...prev, [composicaoId]: current.filter((id) => id !== opcaoId) };
+      const atual = prev[comp.id] || [];
+      const existente = atual.find((s) => s.id === opcao.id);
+      const novaQtd = (existente?.qtd || 0) + delta;
+
+      if (novaQtd <= 0) {
+        return { ...prev, [comp.id]: atual.filter((s) => s.id !== opcao.id) };
       }
-      if (!multiplo) return { ...prev, [composicaoId]: [opcaoId] };
-      if (current.length >= maxOpcoes)
-        return { ...prev, [composicaoId]: [...current.slice(1), opcaoId] };
-      return { ...prev, [composicaoId]: [...current, opcaoId] };
+      // Opção exclusiva (ex.: Vibe 2L) substitui toda a seleção do grupo.
+      if (opcao.exclusivo) return { ...prev, [comp.id]: [{ id: opcao.id, qtd: 1 }] };
+
+      const consumo = Math.max(1, opcao.consomeQtd || 1);
+      const usadaSemEsta = atual
+        .filter((s) => s.id !== opcao.id)
+        .reduce((soma, s) => {
+          const o = (comp.opcoes || []).find((x) => x.id === s.id);
+          return soma + s.qtd * Math.max(1, o?.consomeQtd || 1);
+        }, 0);
+      const max = comp.maxOpcoes || 1;
+      if (usadaSemEsta + novaQtd * consumo > max) return prev;
+
+      return {
+        ...prev,
+        [comp.id]: existente
+          ? atual.map((s) => (s.id === opcao.id ? { ...s, qtd: novaQtd } : s))
+          : [...atual, { id: opcao.id, qtd: novaQtd }],
+      };
     });
+  };
+
+  // Alterna uma opção dentro de uma composição (grupos sem quantidade)
+  const toggleCompOpcao = (comp, opcao) => {
+    const { id: composicaoId, multiplo, maxOpcoes } = comp;
+    setCompSelections((prev) => {
+      const atual = prev[composicaoId] || [];
+      if (atual.some((s) => s.id === opcao.id)) {
+        return { ...prev, [composicaoId]: atual.filter((s) => s.id !== opcao.id) };
+      }
+      const nova = { id: opcao.id, qtd: 1 };
+      if (!multiplo || opcao.exclusivo) return { ...prev, [composicaoId]: [nova] };
+      if (quotaUsada(comp) + Math.max(1, opcao.consomeQtd || 1) > (maxOpcoes || 1)) {
+        return { ...prev, [composicaoId]: [...atual.slice(1), nova] };
+      }
+      return { ...prev, [composicaoId]: [...atual, nova] };
+    });
+  };
+
+  // Um grupo está completo quando atende o mínimo/quota exigida
+  const grupoCompleto = (comp) => {
+    const usada = quotaUsada(comp);
+    if (usada === 0) return false;
+    if (comp.exigeTotalExato) return usada >= (comp.maxOpcoes || 1);
+    const montagem = comp.multiplo && (comp.valorAdicional || 0) > 0;
+    if (montagem) return usada >= (comp.minOpcoes || 1);
+    return comp.multiplo ? usada >= (comp.maxOpcoes || 1) : usada >= 1;
+  };
+
+  // Valor extra do grupo conforme a regra (montagem por porção ou valor por componente)
+  const extraDoGrupo = (comp) => {
+    const sel = selecoesDoGrupo(comp.id);
+    const totalPorcoes = sel.reduce((s, x) => s + x.qtd, 0);
+    if (comp.multiplo && (comp.valorAdicional || 0) > 0) {
+      const pagas = Math.max(0, totalPorcoes - (comp.porcoesGratis || 0));
+      return pagas * (comp.valorAdicional || 0);
+    }
+    return sel.reduce((soma, s) => {
+      const opcao = (comp.opcoes || []).find((o) => o.id === s.id);
+      return soma + (opcao?.valorExtra || 0) * s.qtd;
+    }, 0);
   };
 
   // Confirma a composição e adiciona o item montado ao carrinho
@@ -1063,27 +1150,28 @@ export default function PDVScreen({ navigation }) {
     }
     const comps = compModalProduct.composicoes || [];
     for (const comp of comps) {
-      if (comp.obrigatorio && !(compSelections[comp.id] || []).length) {
-        Alert.alert('Atenção', `Selecione uma opção para "${comp.nome}".`);
+      if (comp.obrigatorio && !grupoCompleto(comp)) {
+        Alert.alert(
+          'Atenção',
+          comp.exigeTotalExato
+            ? `Selecione ${comp.maxOpcoes} itens em "${comp.nome}".`
+            : `Selecione uma opção para "${comp.nome}".`
+        );
         return;
       }
     }
     let extraTotal = 0;
     const labelParts = [];
     comps.forEach((comp) => {
-      const sel = compSelections[comp.id] || [];
-      const selectedOpcoes = (comp.opcoes || []).filter((o) => sel.includes(o.id));
-      const montagem = comp.multiplo && (comp.valorAdicional || 0) > 0;
-      if (montagem) {
-        const pagas = Math.max(0, selectedOpcoes.length - (comp.porcoesGratis || 0));
-        extraTotal += pagas * (comp.valorAdicional || 0);
-      } else {
-        selectedOpcoes.forEach((o) => {
-          extraTotal += o.valorExtra || 0;
+      extraTotal += extraDoGrupo(comp);
+      const sel = selecoesDoGrupo(comp.id);
+      if (sel.length > 0) {
+        const nomes = sel.map((s) => {
+          const opcao = (comp.opcoes || []).find((o) => o.id === s.id);
+          return s.qtd > 1 ? `${s.qtd}x ${opcao?.nome}` : opcao?.nome;
         });
+        labelParts.push(`${comp.nome}: ${nomes.join(', ')}`);
       }
-      if (selectedOpcoes.length > 0)
-        labelParts.push(`${comp.nome}: ${selectedOpcoes.map((o) => o.nome).join(', ')}`);
     });
     const finalPrice = compModalProduct.value + extraTotal;
     const composicaoLabel = labelParts.join(' | ');
@@ -1702,7 +1790,7 @@ export default function PDVScreen({ navigation }) {
                           <View style={styles.produtoTexto}>
                             <Text style={styles.produtoNome}>{produto.name}</Text>
                             <Text style={styles.produtoUnidade}>
-                              {produto.unit} · estoque: {produto.quantity}
+                              {rotuloUnidade(produto)} · estoque: {produto.quantity}
                             </Text>
                             <Text style={styles.produtoPreco}>
                               R$ {formatarValor(produto.value || 0)}
@@ -1730,7 +1818,7 @@ export default function PDVScreen({ navigation }) {
                         <View style={styles.produtoTexto}>
                           <Text style={styles.produtoNome}>{selecionado.name}</Text>
                           <Text style={styles.produtoUnidade}>
-                            {selecionado.unit} · estoque: {selecionado.quantity}
+                            {rotuloUnidade(selecionado)} · estoque: {selecionado.quantity}
                           </Text>
                           <Text style={styles.produtoPreco}>
                             R$ {formatarValor(selecionado.value || 0)}
@@ -1762,7 +1850,7 @@ export default function PDVScreen({ navigation }) {
                               ]}
                               textStyle={styles.unitOptionChipText}
                             >
-                              {item.unit} · R$ {formatarValor(item.value || 0)}
+                              {rotuloUnidade(item)} · R$ {formatarValor(item.value || 0)}
                               {esgotado ? ' ✕' : ''}
                             </Chip>
                           );
@@ -3533,59 +3621,103 @@ export default function PDVScreen({ navigation }) {
               <Text style={styles.modalTitle}>{compModalProduct.name}</Text>
               {(() => {
                 const composicoes = compModalProduct.composicoes || [];
-                // Divulgação progressiva: mostra até a primeira composição
-                // ainda não completa. Para composição "múltipla", só é
-                // considerada completa ao atingir o máximo de opções (maxOpcoes);
-                // para simples, basta 1 opção selecionada.
-                const compCompleta = (comp) => {
-                  const qtd = (compSelections[comp.id] || []).length;
-                  const montagem = comp.multiplo && (comp.valorAdicional || 0) > 0;
-                  if (montagem) return qtd >= (comp.minOpcoes || 1);
-                  return comp.multiplo
-                    ? qtd >= (comp.maxOpcoes || 1)
-                    : qtd >= 1;
-                };
+                // Divulgação progressiva: mostra até o primeiro grupo ainda incompleto.
                 const firstEmptyIdx = composicoes.findIndex(
-                  (comp) => !compCompleta(comp)
+                  (comp) => !grupoCompleto(comp)
                 );
                 const visibleComps =
                   firstEmptyIdx === -1
                     ? composicoes
                     : composicoes.slice(0, firstEmptyIdx + 1);
-                return visibleComps.map((comp) => (
+                return visibleComps.map((comp) => {
+                  const usada = quotaUsada(comp);
+                  const max = comp.maxOpcoes || 1;
+                  return (
                   <View key={comp.id} style={styles.compGroup}>
                     <View style={styles.compGroupHeader}>
                       <Text style={styles.compGroupNome}>
                         {comp.nome}
                         {comp.obrigatorio ? ' *' : ''}
                       </Text>
-                      {comp.multiplo && (comp.valorAdicional || 0) > 0 ? (
+                      {comp.permiteQuantidade ? (
                         <Text style={styles.compGroupMulti}>
-                          {(compSelections[comp.id] || []).length}/{comp.maxOpcoes} • {comp.porcoesGratis} grátis • +R$ {formatarValor(comp.valorAdicional)}
+                          {usada}/{max}
+                          {comp.exigeTotalExato ? ' (exato)' : ''}
+                          {(comp.valorAdicional || 0) > 0
+                            ? ` • ${comp.porcoesGratis} grátis • +R$ ${formatarValor(comp.valorAdicional)}`
+                            : ''}
+                        </Text>
+                      ) : comp.multiplo && (comp.valorAdicional || 0) > 0 ? (
+                        <Text style={styles.compGroupMulti}>
+                          {usada}/{max} • {comp.porcoesGratis} grátis • +R$ {formatarValor(comp.valorAdicional)}
                         </Text>
                       ) : comp.multiplo ? (
-                        <Text style={styles.compGroupMulti}>até {comp.maxOpcoes}</Text>
+                        <Text style={styles.compGroupMulti}>até {max}</Text>
                       ) : null}
                     </View>
                     {(comp.opcoes || [])
                       .filter((o) => o.disponivel)
                       .map((opcao) => {
-                        const selected = (compSelections[comp.id] || []).includes(opcao.id);
+                        const qtd = qtdSelecionada(comp.id, opcao.id);
                         const stockQty = opcao.estoque?.quantity ?? null;
-                        const esgotado = stockQty != null && stockQty <= 0 && !temIrmaoConvertivel(opcao.estoque);
+                        const esgotado =
+                          stockQty != null && stockQty <= 0 && !temIrmaoConvertivel(opcao.estoque);
+                        const bloqueada = opcaoBloqueada(comp, opcao);
+                        const consumo = Math.max(1, opcao.consomeQtd || 1);
+                        const semQuota = usada + consumo > max;
+
+                        if (comp.permiteQuantidade && !opcao.exclusivo) {
+                          return (
+                            <View key={opcao.id} style={styles.compQtdRow}>
+                              <View style={{ flex: 1 }}>
+                                <Text
+                                  style={[
+                                    styles.compQtdNome,
+                                    (esgotado || bloqueada) && styles.compQtdNomeInativo,
+                                  ]}
+                                >
+                                  {opcao.nome}
+                                  {opcao.valorExtra > 0
+                                    ? ` (+R$ ${formatarValor(opcao.valorExtra)})`
+                                    : ''}
+                                  {esgotado ? ' • esgotado' : ''}
+                                </Text>
+                                {stockQty != null && stockQty > 0 && stockQty <= 3 && (
+                                  <Text style={styles.compQtdEstoque}>⚠ {stockQty} restantes</Text>
+                                )}
+                              </View>
+                              <IconButton
+                                icon="minus"
+                                size={18}
+                                mode="contained-tonal"
+                                disabled={qtd <= 0}
+                                onPress={() => alterarQtdOpcao(comp, opcao, -1)}
+                              />
+                              <Text style={styles.compQtdValor}>{qtd}</Text>
+                              <IconButton
+                                icon="plus"
+                                size={18}
+                                mode="contained-tonal"
+                                disabled={esgotado || bloqueada || semQuota}
+                                onPress={() => alterarQtdOpcao(comp, opcao, 1)}
+                              />
+                            </View>
+                          );
+                        }
+
                         return (
                           <Chip
                             key={opcao.id}
-                            selected={selected}
-                            disabled={esgotado}
+                            selected={qtd > 0}
+                            disabled={esgotado || bloqueada}
                             onPress={() =>
-                              !esgotado &&
-                              toggleCompOpcao(comp.id, opcao.id, comp.multiplo, comp.maxOpcoes)
+                              !esgotado && !bloqueada && toggleCompOpcao(comp, opcao)
                             }
                             style={styles.compOpcaoChip}
                             showSelectedCheck
                           >
                             {opcao.nome}
+                            {opcao.exclusivo ? ` (ocupa ${consumo})` : ''}
                             {opcao.valorExtra > 0
                               ? ` (+R$ ${formatarValor(opcao.valorExtra)})`
                               : ''}
@@ -3594,7 +3726,8 @@ export default function PDVScreen({ navigation }) {
                         );
                       })}
                   </View>
-                ));
+                  );
+                });
               })()}
 
               <Divider style={styles.divider} />
@@ -3604,18 +3737,10 @@ export default function PDVScreen({ navigation }) {
                   R${' '}
                   {formatarValor(
                     (compModalProduct.value || 0) +
-                      (compModalProduct.composicoes || []).reduce((sum, comp) => {
-                        const sel = compSelections[comp.id] || [];
-                        const selectedOpcoes = (comp.opcoes || []).filter((o) => sel.includes(o.id));
-                        if (comp.multiplo && (comp.valorAdicional || 0) > 0) {
-                          const pagas = Math.max(0, selectedOpcoes.length - (comp.porcoesGratis || 0));
-                          return sum + pagas * (comp.valorAdicional || 0);
-                        }
-                        return (
-                          sum +
-                          selectedOpcoes.reduce((s, o) => s + (o.valorExtra || 0), 0)
-                        );
-                      }, 0)
+                      (compModalProduct.composicoes || []).reduce(
+                        (sum, comp) => sum + extraDoGrupo(comp),
+                        0
+                      )
                   )}
                 </Text>
               </View>
@@ -4203,6 +4328,29 @@ const styles = StyleSheet.create({
   },
   compOpcaoChip: {
     marginBottom: 6,
+  },
+  compQtdRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  compQtdNome: {
+    color: '#fff',
+    fontSize: 14,
+  },
+  compQtdNomeInativo: {
+    color: '#777',
+  },
+  compQtdEstoque: {
+    color: '#ffb74d',
+    fontSize: 11,
+  },
+  compQtdValor: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    minWidth: 24,
+    textAlign: 'center',
   },
   modalBotoes: {
     marginTop: 16,

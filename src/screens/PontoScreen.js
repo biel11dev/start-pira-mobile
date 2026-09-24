@@ -261,7 +261,8 @@ export default function PontoScreen({ navigation }) {
       const res = await api.get(`/api/pdv-gastos-bar/funcionario/${encodeURIComponent(nome.trim())}`, {
         params: { startDate: inicio.toISOString(), endDate: fim.toISOString() },
       });
-      return parseFloat(res.data?.total) || 0;
+      // Descontos concedidos na venda não entram na dedução do Ponto (só produtos/vales consumidos pelo funcionário).
+      return (parseFloat(res.data?.totalProdutos) || 0) + (parseFloat(res.data?.totalVales) || 0);
     } catch (error) {
       console.error('Erro ao buscar gastos bar do funcionário:', error);
       return 0;
@@ -279,11 +280,15 @@ export default function PontoScreen({ navigation }) {
       const res = await api.get(`/api/pdv-gastos-bar/funcionario/${encodeURIComponent(range.nome.trim())}`, {
         params: { startDate: range.inicio.toISOString(), endDate: range.fim.toISOString() },
       });
+      // Descontos concedidos na venda são exibidos apenas no Gastos Bar do PDV/Caixa, não entram no Ponto.
+      const totalProdutos = res.data?.totalProdutos || 0;
+      const totalVales = res.data?.totalVales || 0;
+      const itensSemDesconto = (res.data?.itens || []).filter((i) => i.tipo !== 'DESCONTO');
       setGastosModalData({
-        total: res.data?.total || 0,
-        totalProdutos: res.data?.totalProdutos || 0,
-        totalVales: res.data?.totalVales || 0,
-        itens: res.data?.itens || [],
+        total: totalProdutos + totalVales,
+        totalProdutos,
+        totalVales,
+        itens: itensSemDesconto,
       });
     } catch (error) {
       console.error('Erro ao carregar detalhes dos gastos:', error);
