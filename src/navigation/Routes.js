@@ -23,7 +23,7 @@ import AuditoriaScreen from '../screens/AuditoriaScreen';
 const Stack = createNativeStackNavigator();
 
 export default function Routes() {
-  const { signed, loading } = useAuth();
+  const { signed, loading, user } = useAuth();
 
   if (loading) {
     return (
@@ -33,9 +33,13 @@ export default function Routes() {
     );
   }
 
+  // Funcionário com acesso ao PDV (sem permissão de acessos/admin) cai direto no PDV, como no Web
+  const isFuncionarioPdv = user?.permissions?.pdv === true && user?.permissions?.acessos !== true;
+  const initialRouteName = signed ? (isFuncionarioPdv ? 'PDV' : 'Home') : 'Login';
+
   return (
     <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRouteName}>
         {signed ? (
           <>
             <Stack.Screen name='Home' component={HomeScreen} />

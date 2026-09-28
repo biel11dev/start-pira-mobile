@@ -1728,47 +1728,41 @@ export default function PDVScreen({ navigation }) {
         >
           Venda
         </Chip>
-        {isAdmin && (
-          <Chip
-            selected={subTab === 'add'}
-            onPress={() => {
-              setSubTab('add');
-              carregarOrigens();
-              carregarOrigemSaldos();
-            }}
-            style={styles.subTabChip}
-            icon="plus-box"
-          >
-            ADD
-          </Chip>
-        )}
-        {isAdmin && (
-          <Chip
-            selected={subTab === 'vale'}
-            onPress={() => {
-              setSubTab('vale');
-              carregarOrigens();
-              carregarOrigemSaldos();
-            }}
-            style={styles.subTabChip}
-            icon="cash-minus"
-          >
-            Vale
-          </Chip>
-        )}
-        {isAdmin && (
-          <Chip
-            selected={subTab === 'premio'}
-            onPress={() => {
-              setSubTab('premio');
-              carregarOrigemSaldos();
-            }}
-            style={styles.subTabChip}
-            icon="trophy"
-          >
-            Prêmio
-          </Chip>
-        )}
+        <Chip
+          selected={subTab === 'add'}
+          onPress={() => {
+            setSubTab('add');
+            carregarOrigens();
+            carregarOrigemSaldos();
+          }}
+          style={styles.subTabChip}
+          icon="plus-box"
+        >
+          ADD
+        </Chip>
+        <Chip
+          selected={subTab === 'vale'}
+          onPress={() => {
+            setSubTab('vale');
+            carregarOrigens();
+            carregarOrigemSaldos();
+          }}
+          style={styles.subTabChip}
+          icon="cash-minus"
+        >
+          Vale
+        </Chip>
+        <Chip
+          selected={subTab === 'premio'}
+          onPress={() => {
+            setSubTab('premio');
+            carregarOrigemSaldos();
+          }}
+          style={styles.subTabChip}
+          icon="trophy"
+        >
+          Prêmio
+        </Chip>
         <Chip
           selected={subTab === 'comandas'}
           onPress={() => {
@@ -1813,16 +1807,14 @@ export default function PDVScreen({ navigation }) {
             Config. Venda
           </Chip>
         )}
-        {isAdmin && (
-          <Chip
-            selected={subTab === 'caixa'}
-            onPress={abrirCaixaTab}
-            style={styles.subTabChip}
-            icon="cash-register"
-          >
-            Caixa
-          </Chip>
-        )}
+        <Chip
+          selected={subTab === 'caixa'}
+          onPress={abrirCaixaTab}
+          style={styles.subTabChip}
+          icon="cash-register"
+        >
+          Caixa
+        </Chip>
       </ScrollView>
 
       {subTab === 'venda' && (
@@ -4058,12 +4050,13 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    flexDirection: 'row',
+    flexDirection: 'column',
     padding: 8,
   },
   leftPanel: {
     flex: 2,
-    marginRight: 8,
+    marginRight: 0,
+    marginBottom: 8,
   },
   rightPanel: {
     flex: 1,
