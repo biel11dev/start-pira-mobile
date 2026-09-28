@@ -1716,6 +1716,9 @@ export default function PDVScreen({ navigation }) {
         )}
         <Appbar.Content title="PDV - Ponto de Venda" titleStyle={styles.headerTitle} />
         {!navigation.canGoBack() && (
+          <Appbar.Action icon="view-grid" onPress={() => navigation.navigate('Home')} color="#fff" />
+        )}
+        {!navigation.canGoBack() && (
           <Appbar.Action icon="logout" onPress={signOut} color="#fff" />
         )}
       </Appbar.Header>
