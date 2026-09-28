@@ -1826,7 +1826,7 @@ export default function PDVScreen({ navigation }) {
 
       {subTab === 'venda' && (
       <View style={styles.content}>
-        <View style={styles.leftPanel}>
+        <View style={[styles.leftPanel, carrinho.length > 0 && styles.leftPanelComCarrinho]}>
           <TextInput
             label="Buscar produto"
             value={busca}
@@ -1932,7 +1932,7 @@ export default function PDVScreen({ navigation }) {
           </ScrollView>
         </View>
 
-        <View style={styles.rightPanel}>
+        <View style={[styles.rightPanel, carrinho.length > 0 && styles.rightPanelComCarrinho]}>
           <Card style={styles.carrinhoCard} contentStyle={styles.carrinhoCardInner}>
             <Card.Title
               title={`Carrinho (${carrinho.length})`}
@@ -1951,13 +1951,13 @@ export default function PDVScreen({ navigation }) {
                         <Text style={styles.carrinhoItemNome}>
                           {item.name} ({item.unit})
                         </Text>
-                        {item.composicaoLabel ? (
-                          <Text style={styles.carrinhoItemComp}>{item.composicaoLabel}</Text>
-                        ) : null}
                         <Text style={styles.carrinhoItemPreco}>
                           R$ {formatarValor(item.value * item.quantidade)}
                         </Text>
                       </View>
+                      {item.composicaoLabel ? (
+                        <Text style={styles.carrinhoItemComp}>{item.composicaoLabel}</Text>
+                      ) : null}
                       <View style={styles.carrinhoItemControls}>
                         <IconButton
                           icon="minus"
@@ -4071,9 +4071,15 @@ const styles = StyleSheet.create({
     minHeight: 0,
     marginBottom: 8,
   },
+  leftPanelComCarrinho: {
+    flex: 1,
+  },
   rightPanel: {
     flex: 2,
     minHeight: 0,
+  },
+  rightPanelComCarrinho: {
+    flex: 1,
   },
   header: {
     backgroundColor: '#1a1a1a',
