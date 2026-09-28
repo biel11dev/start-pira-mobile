@@ -89,7 +89,7 @@ function OrigemRows({ origens, setOrigens, origensDisponiveis }) {
 
 
 export default function PDVScreen({ navigation }) {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const [produtos, setProdutos] = useState([]);
   const [estoqueCompleto, setEstoqueCompleto] = useState([]);
   const [selectedProductUnits, setSelectedProductUnits] = useState({});
@@ -1709,8 +1709,13 @@ export default function PDVScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <Appbar.Header style={styles.header}>
-        <Appbar.BackAction onPress={() => navigation.goBack()} color="#fff" />
+        {navigation.canGoBack() && (
+          <Appbar.BackAction onPress={() => navigation.goBack()} color="#fff" />
+        )}
         <Appbar.Content title="PDV - Ponto de Venda" titleStyle={styles.headerTitle} />
+        {!navigation.canGoBack() && (
+          <Appbar.Action icon="logout" onPress={signOut} color="#fff" />
+        )}
       </Appbar.Header>
 
       {/* Abas de sub-módulos (ações) */}
@@ -1844,7 +1849,7 @@ export default function PDVScreen({ navigation }) {
                   const produto = items[0];
                   return (
                     <Card key={produto.id} style={styles.produtoCard}>
-                      <Card.Content>
+                      <Card.Content style={styles.produtoCardContent}>
                         <View style={styles.produtoInfo}>
                           <View style={styles.produtoTexto}>
                             <Text style={styles.produtoNome}>{produto.name}</Text>
@@ -1858,6 +1863,7 @@ export default function PDVScreen({ navigation }) {
                           <IconButton
                             icon="plus"
                             mode="contained"
+                            size={18}
                             disabled={produto.quantity <= 0 && !hasConversionSibling(produto)}
                             onPress={() => adicionarAoCarrinho(produto)}
                           />
@@ -1872,7 +1878,7 @@ export default function PDVScreen({ navigation }) {
                 const selecionado = items.find((i) => i.id === selectedId) || items[0];
                 return (
                   <Card key={key} style={styles.produtoCard}>
-                    <Card.Content>
+                    <Card.Content style={styles.produtoCardContent}>
                       <View style={styles.produtoInfo}>
                         <View style={styles.produtoTexto}>
                           <Text style={styles.produtoNome}>{selecionado.name}</Text>
@@ -1886,6 +1892,7 @@ export default function PDVScreen({ navigation }) {
                         <IconButton
                           icon="plus"
                           mode="contained"
+                          size={18}
                           disabled={selecionado.quantity <= 0 && !hasConversionSibling(selecionado)}
                           onPress={() => adicionarAoCarrinho(selecionado)}
                         />
@@ -1925,9 +1932,13 @@ export default function PDVScreen({ navigation }) {
 
         <View style={styles.rightPanel}>
           <Card style={styles.carrinhoCard}>
-            <Card.Title title="Carrinho" titleStyle={{ color: '#fff' }} />
+            <Card.Title
+              title={`Carrinho (${carrinho.length})`}
+              titleStyle={{ color: '#fff', fontSize: 15 }}
+              style={{ minHeight: 40 }}
+            />
             <Divider />
-            <Card.Content>
+            <Card.Content style={styles.carrinhoCardContent}>
               {carrinho.length === 0 ? (
                 <Text style={styles.carrinhoVazio}>Carrinho vazio</Text>
               ) : (
@@ -1966,7 +1977,7 @@ export default function PDVScreen({ navigation }) {
           </Card>
 
           <Card style={styles.totalCard}>
-            <Card.Content>
+            <Card.Content style={styles.totalCardContent}>
               <Text style={styles.totalLabel}>Total:</Text>
               <Text style={styles.totalValor}>R$ {formatarValor(subtotal)}</Text>
             </Card.Content>
@@ -4054,12 +4065,13 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   leftPanel: {
-    flex: 2,
-    marginRight: 0,
+    flex: 3,
+    minHeight: 0,
     marginBottom: 8,
   },
   rightPanel: {
-    flex: 1,
+    flex: 2,
+    minHeight: 0,
   },
   header: {
     backgroundColor: '#1a1a1a',
@@ -4075,8 +4087,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   produtoCard: {
-    marginBottom: 8,
+    marginBottom: 6,
     backgroundColor: '#1a1a1a',
+  },
+  produtoCardContent: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
   },
   produtoInfo: {
     flexDirection: 'row',
@@ -4087,16 +4103,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   produtoNome: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '500',
     color: '#fff',
   },
   produtoUnidade: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#999',
   },
   produtoPreco: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#2196F3',
     fontWeight: 'bold',
   },
@@ -4120,9 +4136,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   carrinhoCard: {
+    flex: 1,
+    minHeight: 0,
     marginBottom: 8,
-    maxHeight: '55%',
     backgroundColor: '#1a1a1a',
+  },
+  carrinhoCardContent: {
+    flex: 1,
+    minHeight: 0,
+    paddingHorizontal: 12,
+    paddingBottom: 8,
   },
   carrinhoVazio: {
     textAlign: 'center',
@@ -4130,7 +4153,7 @@ const styles = StyleSheet.create({
     color: '#999',
   },
   carrinhoLista: {
-    maxHeight: 260,
+    flex: 1,
   },
   carrinhoItem: {
     paddingVertical: 8,
@@ -4173,17 +4196,23 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     backgroundColor: '#1a1a1a',
   },
+  totalCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
   totalLabel: {
     fontSize: 14,
     color: '#fff',
   },
   totalValor: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#4caf50',
   },
   finalizarButton: {
-    paddingVertical: 8,
+    paddingVertical: 4,
     backgroundColor: '#4caf50',
   },
   modalContent: {

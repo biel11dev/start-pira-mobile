@@ -39,11 +39,25 @@ export default function Routes() {
 
   return (
     <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRouteName}>
+      {/* key força o navigator a remontar quando a rota inicial muda (login/logout) */}
+      <Stack.Navigator
+        key={initialRouteName}
+        screenOptions={{ headerShown: false }}
+        initialRouteName={initialRouteName}
+      >
         {signed ? (
           <>
-            <Stack.Screen name='Home' component={HomeScreen} />
-            <Stack.Screen name='PDV' component={PDVScreen} />
+            {isFuncionarioPdv ? (
+              <>
+                <Stack.Screen name='PDV' component={PDVScreen} />
+                <Stack.Screen name='Home' component={HomeScreen} />
+              </>
+            ) : (
+              <>
+                <Stack.Screen name='Home' component={HomeScreen} />
+                <Stack.Screen name='PDV' component={PDVScreen} />
+              </>
+            )}
             <Stack.Screen name='CashRegister' component={CashRegisterScreen} />
             <Stack.Screen name='Fiado' component={FiadoScreen} />
             <Stack.Screen name='Pessoal' component={PessoalScreen} />
