@@ -27,6 +27,7 @@ import {
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { formatarValor } from '../utils/format';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Formas de pagamento padrão (usadas se a API não retornar nenhuma)
 const FORMAS_PADRAO = [
@@ -90,6 +91,7 @@ function OrigemRows({ origens, setOrigens, origensDisponiveis }) {
 
 export default function PDVScreen({ navigation }) {
   const { user, signOut } = useAuth();
+  const insets = useSafeAreaInsets();
   const [produtos, setProdutos] = useState([]);
   const [estoqueCompleto, setEstoqueCompleto] = useState([]);
   const [selectedProductUnits, setSelectedProductUnits] = useState({});
@@ -1931,7 +1933,7 @@ export default function PDVScreen({ navigation }) {
         </View>
 
         <View style={styles.rightPanel}>
-          <Card style={styles.carrinhoCard}>
+          <Card style={styles.carrinhoCard} contentStyle={styles.carrinhoCardInner}>
             <Card.Title
               title={`Carrinho (${carrinho.length})`}
               titleStyle={{ color: '#fff', fontSize: 15 }}
@@ -1988,7 +1990,7 @@ export default function PDVScreen({ navigation }) {
             onPress={abrirCheckout}
             loading={loading}
             disabled={loading || carrinho.length === 0}
-            style={styles.finalizarButton}
+            style={[styles.finalizarButton, { marginBottom: insets.bottom }]}
             icon="cash-register"
           >
             Finalizar Venda
@@ -4140,6 +4142,10 @@ const styles = StyleSheet.create({
     minHeight: 0,
     marginBottom: 8,
     backgroundColor: '#1a1a1a',
+  },
+  carrinhoCardInner: {
+    flex: 1,
+    minHeight: 0,
   },
   carrinhoCardContent: {
     flex: 1,
