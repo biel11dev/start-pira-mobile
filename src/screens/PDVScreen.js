@@ -4079,7 +4079,7 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
   rightPanelComCarrinho: {
-    flex: 1,
+    flex: 1.6,
   },
   header: {
     backgroundColor: '#1a1a1a',
