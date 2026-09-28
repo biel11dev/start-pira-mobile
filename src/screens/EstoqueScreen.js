@@ -30,6 +30,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function EstoqueScreen({ navigation }) {
   const { user } = useAuth();
+  const isAdmin = user?.permissions?.acessos === true;
   const insets = useSafeAreaInsets();
   const [estoque, setEstoque] = useState([]);
   const [minimoMap, setMinimoMap] = useState({}); // estoqueId -> quantidadeMinima
@@ -808,6 +809,7 @@ export default function EstoqueScreen({ navigation }) {
 
                         <Divider style={styles.divider} />
 
+                        {isAdmin && (
                         <View style={styles.acoesRow}>
                           <Button
                             compact
@@ -864,6 +866,7 @@ export default function EstoqueScreen({ navigation }) {
                             Excluir
                           </Button>
                         </View>
+                        )}
                       </Card.Content>
                     </Card>
                   );

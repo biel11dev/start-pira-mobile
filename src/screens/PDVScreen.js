@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -222,6 +222,9 @@ export default function PDVScreen({ navigation }) {
   const [gastosBarResumo, setGastosBarResumo] = useState([]);
   const [gastosBarView, setGastosBarView] = useState('semanas'); // semanas | funcionarios
   const [loadingGastosBar, setLoadingGastosBar] = useState(false);
+  const [gastosBarFiltroDataInicio, setGastosBarFiltroDataInicio] = useState('');
+  const [gastosBarFiltroDataFim, setGastosBarFiltroDataFim] = useState('');
+  const [gastosBarFiltroTipo, setGastosBarFiltroTipo] = useState('todos'); // todos | PRODUTO | VALE | DESCONTO
   // Origem histórico (visão dentro do Caixa)
   const [origemHistoricoNome, setOrigemHistoricoNome] = useState(null);
   const [origemHistoricoMovs, setOrigemHistoricoMovs] = useState([]);
@@ -856,6 +859,53 @@ export default function PDVScreen({ navigation }) {
       setLoadingGastosBar(false);
     }
   };
+
+  const gastosBarLimparFiltros = () => {
+    setGastosBarFiltroDataInicio('');
+    setGastosBarFiltroDataFim('');
+    setGastosBarFiltroTipo('todos');
+  };
+
+  const gastosBarDentroDoPeriodo = (createdAt) => {
+    if (!gastosBarFiltroDataInicio && !gastosBarFiltroDataFim) return true;
+    const data = new Date(createdAt);
+    if (gastosBarFiltroDataInicio && data < new Date(`${gastosBarFiltroDataInicio}T00:00:00`)) return false;
+    if (gastosBarFiltroDataFim && data > new Date(`${gastosBarFiltroDataFim}T23:59:59`)) return false;
+    return true;
+  };
+
+  // Aplica os filtros de data e tipo sobre as semanas, recalculando os totais exibidos
+  const gastosBarSemanasFiltradas = useMemo(() => {
+    const mostrarProduto = gastosBarFiltroTipo === 'todos' || gastosBarFiltroTipo === 'PRODUTO';
+    const mostrarVale = gastosBarFiltroTipo === 'todos' || gastosBarFiltroTipo === 'VALE';
+    const mostrarDesconto = gastosBarFiltroTipo === 'todos' || gastosBarFiltroTipo === 'DESCONTO';
+    return gastosBarSemanas
+      .map((semana) => {
+        const produtos = mostrarProduto ? (semana.produtos || []).filter((g) => gastosBarDentroDoPeriodo(g.createdAt)) : [];
+        const vales = mostrarVale ? (semana.vales || []).filter((g) => gastosBarDentroDoPeriodo(g.createdAt)) : [];
+        const descontos = mostrarDesconto ? (semana.descontos || []).filter((g) => gastosBarDentroDoPeriodo(g.createdAt)) : [];
+        const totalProdutos = produtos.reduce((s, g) => s + (g.valorTotal || 0), 0);
+        const totalVales = vales.reduce((s, g) => s + (g.valorTotal || 0), 0);
+        const totalDescontos = descontos.reduce((s, g) => s + (g.valorTotal || 0), 0);
+        return { ...semana, produtos, vales, descontos, totalProdutos, totalVales, totalDescontos, total: totalProdutos + totalVales + totalDescontos };
+      })
+      .filter((semana) => semana.produtos.length + semana.vales.length + semana.descontos.length > 0);
+  }, [gastosBarSemanas, gastosBarFiltroDataInicio, gastosBarFiltroDataFim, gastosBarFiltroTipo]);
+
+  // Aplica os filtros de data e tipo sobre o resumo por funcionário, recalculando os totais exibidos
+  const gastosBarResumoFiltrado = useMemo(() => {
+    return gastosBarResumo
+      .map((func) => {
+        const itens = (func.itens || []).filter(
+          (g) => (gastosBarFiltroTipo === 'todos' || g.tipo === gastosBarFiltroTipo) && gastosBarDentroDoPeriodo(g.createdAt)
+        );
+        const totalProdutos = itens.filter((g) => g.tipo === 'PRODUTO').reduce((s, g) => s + (g.valorTotal || 0), 0);
+        const totalVales = itens.filter((g) => g.tipo === 'VALE').reduce((s, g) => s + (g.valorTotal || 0), 0);
+        const totalDescontos = itens.filter((g) => g.tipo === 'DESCONTO').reduce((s, g) => s + (g.valorTotal || 0), 0);
+        return { ...func, itens, totalProdutos, totalVales, totalDescontos, total: totalProdutos + totalVales + totalDescontos };
+      })
+      .filter((func) => func.itens.length > 0);
+  }, [gastosBarResumo, gastosBarFiltroDataInicio, gastosBarFiltroDataFim, gastosBarFiltroTipo]);
 
   const carregarOrigemHistorico = async (nome) => {
     if (origemHistoricoNome === nome) {
@@ -3239,13 +3289,64 @@ export default function PDVScreen({ navigation }) {
                   Somente visualização. Lançamentos são gerados automaticamente por vendas em Vale
                   e por vales em dinheiro no PDV.
                 </Text>
+                <View style={styles.dataFiltroRow}>
+                  <TextInput
+                    label="Início (AAAA-MM-DD)"
+                    mode="outlined"
+                    dense
+                    value={gastosBarFiltroDataInicio}
+                    onChangeText={setGastosBarFiltroDataInicio}
+                    style={styles.dataInput}
+                  />
+                  <TextInput
+                    label="Fim (AAAA-MM-DD)"
+                    mode="outlined"
+                    dense
+                    value={gastosBarFiltroDataFim}
+                    onChangeText={setGastosBarFiltroDataFim}
+                    style={styles.dataInput}
+                  />
+                </View>
+                <View style={styles.tipoRow}>
+                  <Chip
+                    selected={gastosBarFiltroTipo === 'todos'}
+                    onPress={() => setGastosBarFiltroTipo('todos')}
+                    style={styles.chip}
+                  >
+                    Todos
+                  </Chip>
+                  <Chip
+                    selected={gastosBarFiltroTipo === 'PRODUTO'}
+                    onPress={() => setGastosBarFiltroTipo('PRODUTO')}
+                    style={styles.chip}
+                  >
+                    🍺 Gasto
+                  </Chip>
+                  <Chip
+                    selected={gastosBarFiltroTipo === 'VALE'}
+                    onPress={() => setGastosBarFiltroTipo('VALE')}
+                    style={styles.chip}
+                  >
+                    💵 Vale
+                  </Chip>
+                  <Chip
+                    selected={gastosBarFiltroTipo === 'DESCONTO'}
+                    onPress={() => setGastosBarFiltroTipo('DESCONTO')}
+                    style={styles.chip}
+                  >
+                    🏷️ Desconto
+                  </Chip>
+                  <Button compact mode="text" onPress={gastosBarLimparFiltros}>
+                    Limpar
+                  </Button>
+                </View>
                 {loadingGastosBar ? (
                   <ActivityIndicator color="#2196F3" style={{ marginTop: 16 }} />
                 ) : gastosBarView === 'semanas' ? (
-                  gastosBarSemanas.length === 0 ? (
+                  gastosBarSemanasFiltradas.length === 0 ? (
                     <Text style={styles.subModuloVazio}>Nenhum gasto registrado.</Text>
                   ) : (
-                    gastosBarSemanas.map((semana, idx) => (
+                    gastosBarSemanasFiltradas.map((semana, idx) => (
                       <Card key={idx} style={styles.caixaCard}>
                         <Card.Content>
                           <Text style={styles.gastosBarSemanaTitulo}>
@@ -3269,10 +3370,10 @@ export default function PDVScreen({ navigation }) {
                       </Card>
                     ))
                   )
-                ) : gastosBarResumo.length === 0 ? (
+                ) : gastosBarResumoFiltrado.length === 0 ? (
                   <Text style={styles.subModuloVazio}>Nenhum gasto por funcionário.</Text>
                 ) : (
-                  gastosBarResumo.map((func, idx) => (
+                  gastosBarResumoFiltrado.map((func, idx) => (
                     <Card key={idx} style={styles.caixaCard}>
                       <Card.Content>
                         <View style={styles.caixaStatusRow}>
@@ -4649,6 +4750,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 6,
+    flexWrap: 'wrap',
+    gap: 6,
   },
   flexInput: {
     flex: 1,
