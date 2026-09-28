@@ -4144,7 +4144,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a1a',
   },
   carrinhoCardInner: {
-    flex: 1,
+    flex: 2,
     minHeight: 0,
   },
   carrinhoCardContent: {
