@@ -1,0 +1,44 @@
+name: Build APK (Android)
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Perfil do EAS Build
+        type: choice
+        default: preview
+        options:
+          - preview
+          - production-apk
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - run: npm ci
+
+      - name: Build APK
+        run: eas build --platform android --profile ${{ inputs.profile }} --local --non-interactive --output ${{ github.workspace }}/start-pira.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: start-pira-apk-${{ inputs.profile }}
+          path: start-pira.apk
+          retention-days: 30
