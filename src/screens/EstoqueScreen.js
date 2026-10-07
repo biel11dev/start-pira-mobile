@@ -878,12 +878,14 @@ export default function EstoqueScreen({ navigation }) {
         </ScrollView>
       </View>
 
-      <FAB
-        style={[styles.fab, { bottom: 16 + insets.bottom }]}
-        icon="plus"
-        label="Entrada"
-        onPress={abrirEntrada}
-      />
+      {isAdmin && (
+        <FAB
+          style={[styles.fab, { bottom: 16 + insets.bottom }]}
+          icon="plus"
+          label="Entrada"
+          onPress={abrirEntrada}
+        />
+      )}
 
       <Portal>
         {/* ===== Modal: Entrada de estoque (sem preço) ===== */}

@@ -6,6 +6,8 @@ import {
   Alert,
   Image,
   Linking,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -104,6 +106,8 @@ export default function PDVScreen({ navigation }) {
 
   // Modal de checkout
   const [checkoutVisible, setCheckoutVisible] = useState(false);
+  const checkoutScrollRef = useRef(null);
+  const saqueSecaoYRef = useRef(0);
   const [formaSelecionada, setFormaSelecionada] = useState(null);
   const [valorRecebido, setValorRecebido] = useState('');
   const [senhaVale, setSenhaVale] = useState('');
@@ -1190,6 +1194,9 @@ export default function PDVScreen({ navigation }) {
     const usada = quotaUsada(comp);
     if (grupoSoTemBase(comp)) return true;
     if (usada === 0) return false;
+    // Opção exclusiva fecha o grupo sozinha, independente da quota exigida.
+    const sel = selecoesDoGrupo(comp.id);
+    if (sel.some((s) => (comp.opcoes || []).find((o) => o.id === s.id)?.exclusivo)) return true;
     if (comp.exigeTotalExato) return usada >= (comp.maxOpcoes || 1);
     const montagem = comp.multiplo && (comp.valorAdicional || 0) > 0;
     if (montagem) return usada >= (comp.minOpcoes || 1);
@@ -1697,6 +1704,16 @@ export default function PDVScreen({ navigation }) {
     setPixData(null);
   };
 
+  // Mantém a seção de saque no topo do modal para não ficar atrás do teclado
+  const rolarParaSaque = () => {
+    setTimeout(() => {
+      checkoutScrollRef.current?.scrollTo({
+        y: Math.max(0, saqueSecaoYRef.current - 8),
+        animated: true,
+      });
+    }, 350);
+  };
+
   const produtosFiltrados = produtos.filter((p) =>
     (p.name || '').toLowerCase().includes(busca.toLowerCase())
   );
@@ -1817,6 +1834,7 @@ export default function PDVScreen({ navigation }) {
             Config. Venda
           </Chip>
         )}
+      {isAdmin && (
         <Chip
           selected={subTab === 'caixa'}
           onPress={abrirCaixaTab}
@@ -1825,6 +1843,7 @@ export default function PDVScreen({ navigation }) {
         >
           Caixa
         </Chip>
+      )}
       </ScrollView>
 
       {subTab === 'venda' && (
@@ -3488,7 +3507,15 @@ export default function PDVScreen({ navigation }) {
           onDismiss={() => setCheckoutVisible(false)}
           contentContainerStyle={styles.modalContent}
         >
-          <ScrollView>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalKeyboardWrap}
+          >
+          <ScrollView
+            ref={checkoutScrollRef}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.checkoutScrollContent}
+          >
             <Text style={styles.modalTitle}>
               {comandaEmPagamento ? 'Pagar Comanda' : 'Finalizar Venda'}
             </Text>
@@ -3661,7 +3688,11 @@ export default function PDVScreen({ navigation }) {
 
             {/* Venda conjunta: Compra + Saque (dinheiro em nota na máquina) */}
             {!comandaEmPagamento && (
-              <>
+              <View
+                onLayout={(e) => {
+                  saqueSecaoYRef.current = e.nativeEvent.layout.y;
+                }}
+              >
                 <Divider style={styles.divider} />
                 <Text style={styles.secaoLabel}>Saque na venda (opcional)</Text>
                 <TextInput
@@ -3671,6 +3702,7 @@ export default function PDVScreen({ navigation }) {
                   value={saqueVendaValor}
                   onChangeText={setSaqueVendaValor}
                   placeholder="0,00"
+                  onFocus={rolarParaSaque}
                 />
                 {(parseFloat(saqueVendaValor) || 0) > 0 && (
                   <View style={styles.saqueVendaBox}>
@@ -3711,7 +3743,7 @@ export default function PDVScreen({ navigation }) {
                     </View>
                   </View>
                 )}
-              </>
+              </View>
             )}
 
             <View style={styles.modalBotoes}>
@@ -3734,6 +3766,7 @@ export default function PDVScreen({ navigation }) {
               </Button>
             </View>
           </ScrollView>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* Modal de composição (produtos dose / com componentes) */}
@@ -4236,6 +4269,13 @@ const styles = StyleSheet.create({
     margin: 16,
     borderRadius: 8,
     maxHeight: '90%',
+  },
+  modalKeyboardWrap: {
+    flexShrink: 1,
+  },
+  // Espaço extra para o campo de saque poder subir ao topo ao receber foco
+  checkoutScrollContent: {
+    paddingBottom: 320,
   },
   modalTitle: {
     color: '#2196F3',
