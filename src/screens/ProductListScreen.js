@@ -21,10 +21,8 @@ import {
 } from 'react-native-paper';
 import api from '../services/api';
 import { formatarValor } from '../utils/format';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ProductListScreen({ navigation }) {
-  const insets = useSafeAreaInsets();
   const [produtos, setProdutos] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalDetalhes, setModalDetalhes] = useState(false);
@@ -522,7 +520,7 @@ export default function ProductListScreen({ navigation }) {
 
       <FAB
         icon="plus"
-        style={[styles.fab, { bottom: 16 + insets.bottom }]}
+        style={[styles.fab, { bottom: 16 }]}
         onPress={() => { limparForm(); setModalVisible(true); }}
       />
 

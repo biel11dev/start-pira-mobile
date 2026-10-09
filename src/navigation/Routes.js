@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../context/AuthContext';
 import { ActivityIndicator, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Screens
 import LoginScreen from '../screens/LoginScreen';
@@ -24,6 +25,7 @@ const Stack = createNativeStackNavigator();
 
 export default function Routes() {
   const { signed, loading, user } = useAuth();
+  const insets = useSafeAreaInsets();
 
   if (loading) {
     return (
@@ -38,6 +40,8 @@ export default function Routes() {
   const initialRouteName = signed ? (isFuncionarioPdv ? 'PDV' : 'Home') : 'Login';
 
   return (
+    // Com edge-to-edge o app desenha sob a barra do Android; o padding inferior evita a sobreposição em todas as telas
+    <View style={{ flex: 1, backgroundColor: '#000000', paddingBottom: insets.bottom }}>
     <NavigationContainer>
       {/* key força o navigator a remontar quando a rota inicial muda (login/logout) */}
       <Stack.Navigator
@@ -77,5 +81,6 @@ export default function Routes() {
         )}
       </Stack.Navigator>
     </NavigationContainer>
+    </View>
   );
 }

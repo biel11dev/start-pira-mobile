@@ -29,7 +29,6 @@ import {
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { formatarValor } from '../utils/format';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Formas de pagamento padrão (usadas se a API não retornar nenhuma)
 const FORMAS_PADRAO = [
@@ -93,7 +92,6 @@ function OrigemRows({ origens, setOrigens, origensDisponiveis }) {
 
 export default function PDVScreen({ navigation }) {
   const { user, signOut } = useAuth();
-  const insets = useSafeAreaInsets();
   const [produtos, setProdutos] = useState([]);
   const [estoqueCompleto, setEstoqueCompleto] = useState([]);
   const [equivMap, setEquivMap] = useState({});
@@ -2030,7 +2028,7 @@ export default function PDVScreen({ navigation }) {
             onPress={abrirCheckout}
             loading={loading}
             disabled={loading || carrinho.length === 0}
-            style={[styles.finalizarButton, { marginBottom: insets.bottom }]}
+            style={styles.finalizarButton}
             icon="cash-register"
           >
             Finalizar Venda

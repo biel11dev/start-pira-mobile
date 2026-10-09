@@ -16,10 +16,12 @@ import {
   ActivityIndicator,
 } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../services/api';
 import { API_URL } from '../config/environment';
 
 export default function LoginScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [loading, setLoading] = useState(false);
@@ -83,7 +85,7 @@ export default function LoginScreen({ navigation }) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
-        contentContainerStyle={styles.scrollContainer}
+        contentContainerStyle={[styles.scrollContainer, { paddingTop: 20 + insets.top }]}
         keyboardShouldPersistTaps='handled'
       >
         <Card style={styles.card}>

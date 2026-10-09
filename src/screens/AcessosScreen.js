@@ -18,10 +18,8 @@ import {
   ActivityIndicator,
 } from 'react-native-paper';
 import api from '../services/api';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function AcessosScreen({ navigation }) {
-  const insets = useSafeAreaInsets();
   const [usuarios, setUsuarios] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalDetalhes, setModalDetalhes] = useState(false);
@@ -161,7 +159,7 @@ export default function AcessosScreen({ navigation }) {
       </ScrollView>
 
       <FAB
-        style={[styles.fab, { bottom: 16 + insets.bottom }]}
+        style={[styles.fab, { bottom: 16 }]}
         icon="plus"
         onPress={() => setModalVisible(true)}
       />

@@ -22,10 +22,8 @@ import {
 import { Picker } from '@react-native-picker/picker';
 import api from '../services/api';
 import { formatarValor } from '../utils/format';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function FiadoScreen({ navigation }) {
-  const insets = useSafeAreaInsets();
   const [clientes, setClientes] = useState([]);
   const [produtos, setProdutos] = useState([]);
   const [modalAddCliente, setModalAddCliente] = useState(false);
@@ -332,7 +330,7 @@ export default function FiadoScreen({ navigation }) {
 
       <FAB
         icon="plus"
-        style={[styles.fab, { bottom: 16 + insets.bottom }]}
+        style={[styles.fab, { bottom: 16 }]}
         onPress={() => setModalAddCliente(true)}
         label="Adicionar Cliente"
       />

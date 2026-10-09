@@ -26,12 +26,10 @@ import { Picker } from '@react-native-picker/picker';
 import api from '../services/api';
 import { formatarValor } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function EstoqueScreen({ navigation }) {
   const { user } = useAuth();
   const isAdmin = user?.permissions?.acessos === true;
-  const insets = useSafeAreaInsets();
   const [estoque, setEstoque] = useState([]);
   const [minimoMap, setMinimoMap] = useState({}); // estoqueId -> quantidadeMinima
   const [catalogo, setCatalogo] = useState([]); // /api/products
@@ -878,7 +876,7 @@ export default function EstoqueScreen({ navigation }) {
 
       {isAdmin && (
         <FAB
-          style={[styles.fab, { bottom: 16 + insets.bottom }]}
+          style={[styles.fab, { bottom: 16 }]}
           icon="plus"
           label="Entrada"
           onPress={abrirEntrada}
