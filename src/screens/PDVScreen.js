@@ -1032,7 +1032,8 @@ export default function PDVScreen({ navigation }) {
     });
   };
 
-  const hasConversionSibling = (produto) => temIrmaoConvertivelEm(produtos, produto);
+  const hasConversionSibling = (produto) =>
+    produto?.isCombo ? comboAbastecivelPorConversao(produto) : temIrmaoConvertivelEm(produtos, produto);
 
   // Combos usam o rótulo da variação de venda no lugar da unidade de medida.
   const rotuloUnidade = (produto) =>
@@ -1042,6 +1043,40 @@ export default function PDVScreen({ navigation }) {
   // por conversão automática de outra unidade do mesmo produto com estoque.
   const temIrmaoConvertivel = (estoqueOpcao) =>
     temIrmaoConvertivelEm(estoqueCompleto, estoqueOpcao);
+
+  // Combo zerado continua vendável se cada grupo obrigatório pode ser suprido por estoque ou conversão.
+  const comboAbastecivelPorConversao = (combo) => {
+    const grupos = (combo?.composicoes || []).filter((c) => c.obrigatorio);
+    if (grupos.length === 0) return false;
+    const viavel = (o) => (o.estoque?.quantity ?? 0) >= 1 || temIrmaoConvertivel(o.estoque);
+    return grupos.every((grupo) => {
+      const opcoes = (grupo.opcoes || []).filter((o) => o.disponivel && o.estoque);
+      const bases = opcoes.filter((o) => o.base);
+      if (!bases.every(viavel)) return false;
+      const quotaBase = bases.reduce((s, o) => s + Math.max(1, o.consomeQtd || 1), 0);
+      const restante = Math.max(0, Math.max(1, grupo.maxOpcoes || 1) - quotaBase);
+      return restante === 0 || opcoes.some((o) => !o.base && viavel(o));
+    });
+  };
+
+  // Item composto (combo/dose) não tem estoque próprio: a baixa ocorre nos componentes.
+  // Pode passar do disponível se cada componente que não cobre a quantidade tem unidade-pai para converter.
+  const compostoPodeConverter = (produtoRef, composicaoJSON, quantidade) => {
+    let selecoes;
+    try { selecoes = JSON.parse(composicaoJSON || '{}'); } catch { return false; }
+    let temSelecao = false;
+    for (const comp of produtoRef?.composicoes || []) {
+      for (const sel of selecoes[comp.id] || []) {
+        const opcao = (comp.opcoes || []).find((o) => o.id === sel.id);
+        if (!opcao?.estoque) continue;
+        temSelecao = true;
+        const necessario = quantidade * (sel.qtd || 1);
+        if ((opcao.estoque.quantity ?? 0) >= necessario) continue;
+        if (!temIrmaoConvertivel(opcao.estoque)) return false;
+      }
+    }
+    return temSelecao;
+  };
 
   // Componentes marcados como base já entram selecionados e não podem ser removidos.
   const selecoesIniciais = (produto) => {
@@ -1100,7 +1135,10 @@ export default function PDVScreen({ navigation }) {
     const maxAvailable = productRef?.quantity ?? item.maxQuantity ?? 0;
     const novaQuantidade = (item.quantidade || 1) + 1;
 
-    if (maxAvailable < novaQuantidade && !hasConversionSibling(productRef)) {
+    const podeConverter = item.composicao
+      ? compostoPodeConverter(productRef, item.composicao, novaQuantidade)
+      : hasConversionSibling(productRef);
+    if (maxAvailable < novaQuantidade && !podeConverter) {
       Alert.alert('Estoque', `Estoque insuficiente para "${item.name}". Disponível: ${maxAvailable}.`);
       return;
     }
@@ -1236,7 +1274,11 @@ export default function PDVScreen({ navigation }) {
   // Confirma a composição e adiciona o item montado ao carrinho
   const confirmComposicao = () => {
     if (!compModalProduct) return;
-    if (compModalProduct.quantity < 1 && !hasConversionSibling(compModalProduct)) {
+    if (
+      compModalProduct.quantity < 1 &&
+      !hasConversionSibling(compModalProduct) &&
+      !compostoPodeConverter(compModalProduct, JSON.stringify(compSelections), 1)
+    ) {
       Alert.alert('Estoque', `Estoque insuficiente para "${compModalProduct.name}".`);
       return;
     }
