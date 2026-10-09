@@ -96,6 +96,7 @@ export default function PDVScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [produtos, setProdutos] = useState([]);
   const [estoqueCompleto, setEstoqueCompleto] = useState([]);
+  const [equivMap, setEquivMap] = useState({});
   const [selectedProductUnits, setSelectedProductUnits] = useState({});
   const [carrinho, setCarrinho] = useState([]);
   const [busca, setBusca] = useState('');
@@ -249,6 +250,7 @@ export default function PDVScreen({ navigation }) {
 
   useEffect(() => {
     carregarProdutos();
+    carregarEquivalencias();
     carregarFormasPagamento();
     carregarTaxaSaque();
     return () => {
@@ -256,6 +258,17 @@ export default function PDVScreen({ navigation }) {
       if (pointPollRef.current) clearInterval(pointPollRef.current);
     };
   }, []);
+
+  const carregarEquivalencias = async () => {
+    try {
+      const res = await api.get('/api/unit-equivalences');
+      const mapa = {};
+      (res.data || []).forEach((e) => { mapa[e.unitName] = e; });
+      setEquivMap(mapa);
+    } catch (error) {
+      console.log('Erro ao carregar equivalências de unidade');
+    }
+  };
 
   const carregarProdutos = async () => {
     try {
@@ -1006,10 +1019,22 @@ export default function PDVScreen({ navigation }) {
     }
   };
 
-  const hasConversionSibling = (produto) => {
-    if (!produto || !produto.productId) return false;
-    return produtos.some((item) => item.productId === produto.productId && item.id !== produto.id);
+  // Uma unidade só é abastecida por conversão a partir de uma irmã não fracional com
+  // estoque (a "garrafa" pai). Dose nunca vira Dose — mesma regra aplicada no backend.
+  const temIrmaoConvertivelEm = (lista, alvo) => {
+    if (!alvo || alvo.productId == null) return false;
+    const alvoEq = equivMap[alvo.unit];
+    return lista.some((item) => {
+      if (item.productId !== alvo.productId || item.id === alvo.id) return false;
+      if ((item.quantity ?? 0) < 1) return false;
+      const itemEq = equivMap[item.unit];
+      if (itemEq?.isFractional) return false;
+      if (alvoEq?.isFractional) return (alvoEq.fractionalValue || 0) > 0;
+      return (itemEq?.value || 1) > (alvoEq?.value || 1);
+    });
   };
+
+  const hasConversionSibling = (produto) => temIrmaoConvertivelEm(produtos, produto);
 
   // Combos usam o rótulo da variação de venda no lugar da unidade de medida.
   const rotuloUnidade = (produto) =>
@@ -1017,15 +1042,8 @@ export default function PDVScreen({ navigation }) {
 
   // Verifica se um ingrediente de composição (unidade zerada) pode ser atendido
   // por conversão automática de outra unidade do mesmo produto com estoque.
-  const temIrmaoConvertivel = (estoqueOpcao) => {
-    if (!estoqueOpcao || estoqueOpcao.productId == null) return false;
-    return estoqueCompleto.some(
-      (item) =>
-        item.productId === estoqueOpcao.productId &&
-        item.id !== estoqueOpcao.id &&
-        (item.quantity ?? 0) >= 1
-    );
-  };
+  const temIrmaoConvertivel = (estoqueOpcao) =>
+    temIrmaoConvertivelEm(estoqueCompleto, estoqueOpcao);
 
   // Componentes marcados como base já entram selecionados e não podem ser removidos.
   const selecoesIniciais = (produto) => {

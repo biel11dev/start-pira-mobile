@@ -151,6 +151,7 @@ export default function EstoqueScreen({ navigation }) {
   };
 
   // Existe unidade de medida MAIOR (irmã) do mesmo produto com estoque para conversão?
+  // Unidades fracionais só são geradas a partir da unidade-pai não fracional.
   const temConversaoDisponivel = (item) => {
     if (!item?.productId) return false;
     const currentEq = equivMap[item.unit];
@@ -158,16 +159,13 @@ export default function EstoqueScreen({ navigation }) {
       (e) => e.productId === item.productId && e.id !== item.id && (e.quantity ?? 0) >= 1
     );
     for (const sib of siblings) {
-      let ratio = null;
-      if (currentEq?.isFractional && currentEq?.fractionalValue > 0) {
-        ratio = currentEq.fractionalValue;
-      } else {
-        const sibEq = equivMap[sib.unit];
-        const currentVal = currentEq?.value || 1;
-        const sibVal = sibEq?.value || 1;
-        if (sibVal > currentVal) ratio = sibVal / currentVal;
+      const sibEq = equivMap[sib.unit];
+      if (sibEq?.isFractional) continue;
+      if (currentEq?.isFractional) {
+        if ((currentEq.fractionalValue || 0) > 0) return true;
+        continue;
       }
-      if (ratio && ratio > 0) return true;
+      if ((sibEq?.value || 1) > (currentEq?.value || 1)) return true;
     }
     return false;
   };
