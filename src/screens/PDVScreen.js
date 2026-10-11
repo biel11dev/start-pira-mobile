@@ -1021,6 +1021,7 @@ export default function PDVScreen({ navigation }) {
   // estoque (a "garrafa" pai). Dose nunca vira Dose — mesma regra aplicada no backend.
   const temIrmaoConvertivelEm = (lista, alvo) => {
     if (!alvo || alvo.productId == null) return false;
+    if (alvo.controlaMontante) return false; // montante já cobre todas as unidades do produto
     const alvoEq = equivMap[alvo.unit];
     return lista.some((item) => {
       if (item.productId !== alvo.productId || item.id === alvo.id) return false;

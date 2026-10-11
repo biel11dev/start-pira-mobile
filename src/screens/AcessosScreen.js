@@ -42,6 +42,7 @@ export default function AcessosScreen({ navigation }) {
   const [baseProduto, setBaseProduto] = useState(false);
   const [pdv, setPdv] = useState(false);
   const [pessoal, setPessoal] = useState(false);
+  const [auditoria, setAuditoria] = useState(false);
 
   useEffect(() => {
     carregarUsuarios();
@@ -99,6 +100,7 @@ export default function AcessosScreen({ navigation }) {
         base_produto: baseProduto,
         pdv,
         pessoal,
+        auditoria,
       });
 
       Alert.alert('Sucesso', 'Permissões atualizadas!');
@@ -123,6 +125,7 @@ export default function AcessosScreen({ navigation }) {
     setBaseProduto(usuario.base_produto || false);
     setPdv(usuario.pdv || false);
     setPessoal(usuario.pessoal || false);
+    setAuditoria(usuario.auditoria || false);
     setModalDetalhes(true);
   };
 
@@ -281,6 +284,11 @@ export default function AcessosScreen({ navigation }) {
               <View style={styles.permissionItem}>
                 <Text style={styles.permissionLabel}>Pessoal</Text>
                 <Switch value={pessoal} onValueChange={setPessoal} />
+              </View>
+
+              <View style={styles.permissionItem}>
+                <Text style={styles.permissionLabel}>Auditoria</Text>
+                <Switch value={auditoria} onValueChange={setAuditoria} />
               </View>
 
               <View style={styles.modalButtons}>

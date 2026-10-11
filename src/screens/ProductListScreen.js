@@ -21,6 +21,7 @@ import {
 } from 'react-native-paper';
 import api from '../services/api';
 import { formatarValor } from '../utils/format';
+import ListaPorCategoria from '../components/ListaPorCategoria';
 
 export default function ProductListScreen({ navigation }) {
   const [produtos, setProdutos] = useState([]);
@@ -476,7 +477,11 @@ export default function ProductListScreen({ navigation }) {
           {produtosFiltrados.length === 0 ? (
             <Text style={styles.semDados}>Nenhum produto cadastrado</Text>
           ) : (
-            produtosFiltrados.map((produto) => (
+            <ListaPorCategoria
+              itens={produtosFiltrados}
+              hierarquico={false}
+              expandirTudo={busca.trim().length > 0}
+              renderItem={(produto) => (
               <Card
                 key={produto.id}
                 style={styles.produtoCard}
@@ -513,7 +518,8 @@ export default function ProductListScreen({ navigation }) {
                   </View>
                 </Card.Content>
               </Card>
-            ))
+              )}
+            />
           )}
         </ScrollView>
       </View>

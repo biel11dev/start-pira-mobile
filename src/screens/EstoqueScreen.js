@@ -26,6 +26,7 @@ import { Picker } from '@react-native-picker/picker';
 import api from '../services/api';
 import { formatarValor } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
+import ListaPorCategoria from '../components/ListaPorCategoria';
 
 export default function EstoqueScreen({ navigation }) {
   const { user } = useAuth();
@@ -152,6 +153,7 @@ export default function EstoqueScreen({ navigation }) {
   // Unidades fracionais só são geradas a partir da unidade-pai não fracional.
   const temConversaoDisponivel = (item) => {
     if (!item?.productId) return false;
+    if (item.controlaMontante) return false; // montante já cobre todas as unidades do produto
     const currentEq = equivMap[item.unit];
     const siblings = estoque.filter(
       (e) => e.productId === item.productId && e.id !== item.id && (e.quantity ?? 0) >= 1
@@ -166,6 +168,60 @@ export default function EstoqueScreen({ navigation }) {
       if ((sibEq?.value || 1) > (currentEq?.value || 1)) return true;
     }
     return false;
+  };
+
+  // ===== Controle por montante (ML): prévia e ativação/desativação por produto =====
+  const alternarMontante = async (item) => {
+    try {
+      const { data: prev } = await api.get(`/api/estoque_prod/montante/preview/${item.productId}`);
+      if (prev.ativo) {
+        Alert.alert(
+          'Controle por montante',
+          `"${prev.nome}" usa controle por montante (${prev.montanteMl} ML).\n\nDesativar e voltar à conversão padrão entre unidades?`,
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            {
+              text: 'Desativar',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  await api.post('/api/estoque_prod/montante/desativar', { productId: item.productId });
+                  carregarTudo();
+                } catch (error) {
+                  Alert.alert('Erro', error.response?.data?.error || 'Erro ao desativar');
+                }
+              },
+            },
+          ]
+        );
+        return;
+      }
+      if (prev.semMl.length > 0) {
+        Alert.alert('Atenção', `Inclua o ML na unidade ou no nome de: ${prev.semMl.map((d) => d.unit).join(', ')}.`);
+        return;
+      }
+      const linhas = prev.resultado.map((r) => `• ${r.unit} (${r.ml}ML): ${r.quantidadeAtual} → ${r.quantidadeNova}`).join('\n');
+      Alert.alert(
+        'Ativar controle por montante?',
+        `"${prev.nome}"\nMontante: ${prev.montanteMl} ML\n\n${linhas}`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Ativar',
+            onPress: async () => {
+              try {
+                await api.post('/api/estoque_prod/montante/ativar', { productId: item.productId });
+                carregarTudo();
+              } catch (error) {
+                Alert.alert('Erro', error.response?.data?.error || 'Erro ao ativar');
+              }
+            },
+          },
+        ]
+      );
+    } catch (error) {
+      Alert.alert('Erro', error.response?.data?.error || 'Erro ao consultar o montante');
+    }
   };
 
   const estaEmFalta = (item) => {
@@ -758,6 +814,7 @@ export default function EstoqueScreen({ navigation }) {
                         <Text style={styles.faltaItemQtd}>
                           {item.quantity} {item.unit}
                           {minimoMap[item.id] != null ? ` / ideal ${minimoMap[item.id]}` : ''}
+                          {item.controlaMontante ? ` · montante ${Number((item.montanteMl || 0).toFixed(2))} ML` : ''}
                         </Text>
                       </View>
                     ))}
@@ -768,7 +825,10 @@ export default function EstoqueScreen({ navigation }) {
               {estoqueFiltrado.length === 0 ? (
                 <Text style={styles.semDados}>Nenhum item no estoque</Text>
               ) : (
-                estoqueFiltrado.map((produto) => {
+                <ListaPorCategoria
+                  itens={estoqueFiltrado}
+                  expandirTudo={busca.trim().length > 0}
+                  renderItem={(produto) => {
                   const emFalta = estaEmFalta(produto);
                   const min = minimoMap[produto.id];
                   return (
@@ -801,6 +861,12 @@ export default function EstoqueScreen({ navigation }) {
 
                         {min != null && (
                           <Text style={styles.idealTexto}>Quantidade ideal: {min}</Text>
+                        )}
+
+                        {produto.controlaMontante && (
+                          <Text style={styles.comboInfo}>
+                            Controlado por montante: {produto.montanteMl} ML
+                          </Text>
                         )}
 
                         <Divider style={styles.divider} />
@@ -843,6 +909,17 @@ export default function EstoqueScreen({ navigation }) {
                           >
                             {produto.composicoes?.length ? `Componente (${produto.composicoes.length})` : 'Componente'}
                           </Button>
+                          {!produto.isCombo && (
+                            <Button
+                              compact
+                              mode={produto.controlaMontante ? 'contained-tonal' : 'text'}
+                              icon="water"
+                              textColor={produto.controlaMontante ? '#4DD0E1' : '#777'}
+                              onPress={() => alternarMontante(produto)}
+                            >
+                              Montante
+                            </Button>
+                          )}
                           <Button
                             compact
                             mode="text"
@@ -866,7 +943,8 @@ export default function EstoqueScreen({ navigation }) {
                       </Card.Content>
                     </Card>
                   );
-                })
+                  }}
+                />
               )}
             </>
           )}
