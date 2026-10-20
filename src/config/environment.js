@@ -23,7 +23,7 @@ const ENV = {
 };
 
 // Altere entre 'production' e 'development' conforme necessário
-const currentEnv = 'qa';
+const currentEnv = 'production';
 
 export const API_URL = ENV[currentEnv].apiUrl;
 
