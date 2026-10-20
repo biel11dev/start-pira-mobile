@@ -74,6 +74,7 @@ export default function PontoScreen({ navigation }) {
     contato: '',
     dataEntrada: '',
     ativo: true,
+    autoPonto: false,
   });
   const [savingFunc, setSavingFunc] = useState(false);
 
@@ -431,6 +432,7 @@ export default function PontoScreen({ navigation }) {
       contato: '',
       dataEntrada: '',
       ativo: true,
+      autoPonto: false,
     });
     setFuncModalVisible(true);
   };
@@ -447,6 +449,7 @@ export default function PontoScreen({ navigation }) {
       contato: func.contato || '',
       dataEntrada: func.dataEntrada ? String(func.dataEntrada).split('T')[0] : '',
       ativo: func.ativo !== false,
+      autoPonto: func.autoPonto === true,
     });
     setFuncModalVisible(true);
   };
@@ -470,6 +473,7 @@ export default function PontoScreen({ navigation }) {
       contato: funcForm.contato.trim() || null,
       dataEntrada: funcForm.dataEntrada || null,
       ativo: funcForm.ativo,
+      ...(isAdmin ? { autoPonto: funcForm.autoPonto } : {}),
     };
     setSavingFunc(true);
     try {
@@ -1550,6 +1554,21 @@ export default function PontoScreen({ navigation }) {
               />
             </View>
 
+            {isAdmin && (
+              <>
+                <View style={styles.funcAtivoRow}>
+                  <Text style={styles.funcFieldLabel}>Ponto automático</Text>
+                  <Switch
+                    value={funcForm.autoPonto}
+                    onValueChange={(v) => setFuncField('autoPonto', v)}
+                  />
+                </View>
+                <Text style={styles.gastoVazio}>
+                  Registra a entrada no login e a saída no logout (com confirmação) deste funcionário.
+                </Text>
+              </>
+            )}
+
             <View style={styles.funcFormButtons}>
               {funcEditando && (
                 <Button
@@ -1585,6 +1604,7 @@ export default function PontoScreen({ navigation }) {
                   <Text style={styles.funcRowSub}>
                     {(f.position || 'N/A')} · R$ {formatarValor(f.valorHora || 0)}/h
                     {f.ativo === false ? ' · inativo' : ''}
+                    {f.autoPonto ? ' · ponto automático' : ''}
                   </Text>
                 </View>
                 <IconButton

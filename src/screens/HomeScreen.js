@@ -15,7 +15,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 
 export default function HomeScreen({ navigation }) {
-  const { user, signOut } = useAuth();
+  const { user, requestSignOut } = useAuth();
 
   const menuItems = [
     { title: 'CAIXA', icon: 'cash-multiple', screen: 'CashRegister', color: '#2196F3', permission: 'caixa' },
@@ -37,7 +37,7 @@ export default function HomeScreen({ navigation }) {
   );
 
   const handleLogout = () => {
-    signOut();
+    requestSignOut();
   };
 
   return (

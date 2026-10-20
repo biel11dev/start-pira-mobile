@@ -8,7 +8,7 @@ import {
 import {
   Appbar,
   Card,
-  TextInput,
+  TextInput as PaperTextInput,
   Button,
   Text,
   FAB,
@@ -19,9 +19,20 @@ import {
   IconButton,
   Divider,
 } from 'react-native-paper';
+import { Picker } from '@react-native-picker/picker';
 import api from '../services/api';
 import { formatarValor } from '../utils/format';
 import ListaPorCategoria from '../components/ListaPorCategoria';
+
+// Rótulo fixo acima do campo (evita o label flutuante cortado pela borda no tema escuro).
+function TextInput({ label, style, ...props }) {
+  return (
+    <View style={style}>
+      {label ? <Text style={styles.fieldLabel}>{label}</Text> : null}
+      <PaperTextInput mode="outlined" {...props} />
+    </View>
+  );
+}
 
 export default function ProductListScreen({ navigation }) {
   const [produtos, setProdutos] = useState([]);
@@ -621,24 +632,19 @@ export default function ProductListScreen({ navigation }) {
             </View>
 
             <Text style={styles.configLabel}>Categoria:</Text>
-            <View style={styles.configChips}>
-              <Chip
-                selected={!selectedCategoryId}
-                onPress={() => setSelectedCategoryId(null)}
-                style={styles.configChip}
+            <View style={styles.categoryPickerWrap}>
+              <Picker
+                selectedValue={selectedCategoryId ?? ''}
+                onValueChange={(value) => setSelectedCategoryId(value === '' ? null : value)}
+                dropdownIconColor="#333"
+                mode="dropdown"
+                style={styles.categoryPicker}
               >
-                Sem categoria
-              </Chip>
-              {categoriasFlat().map((c) => (
-                <Chip
-                  key={c.id}
-                  selected={selectedCategoryId === c.id}
-                  onPress={() => setSelectedCategoryId(c.id)}
-                  style={styles.configChip}
-                >
-                  {c.name}
-                </Chip>
-              ))}
+                <Picker.Item label="Sem categoria" value="" color="#111" />
+                {categoriasFlat().map((c) => (
+                  <Picker.Item key={c.id} label={c.name} value={c.id} color="#111" />
+                ))}
+              </Picker>
             </View>
 
             <Text style={styles.configLabel}>Valores por unidade:</Text>
@@ -721,24 +727,19 @@ export default function ProductListScreen({ navigation }) {
                 />
 
                 <Text style={styles.configLabel}>Categoria:</Text>
-                <View style={styles.configChips}>
-                  <Chip
-                    selected={!editCategoryId}
-                    onPress={() => setEditCategoryId(null)}
-                    style={styles.configChip}
+                <View style={styles.categoryPickerWrap}>
+                  <Picker
+                    selectedValue={editCategoryId ?? ''}
+                    onValueChange={(value) => setEditCategoryId(value === '' ? null : value)}
+                    dropdownIconColor="#333"
+                    mode="dropdown"
+                    style={styles.categoryPicker}
                   >
-                    Sem categoria
-                  </Chip>
-                  {categoriasFlat().map((c) => (
-                    <Chip
-                      key={c.id}
-                      selected={editCategoryId === c.id}
-                      onPress={() => setEditCategoryId(c.id)}
-                      style={styles.configChip}
-                    >
-                      {c.name}
-                    </Chip>
-                  ))}
+                    <Picker.Item label="Sem categoria" value="" color="#111" />
+                    {categoriasFlat().map((c) => (
+                      <Picker.Item key={c.id} label={c.name} value={c.id} color="#111" />
+                    ))}
+                  </Picker>
                 </View>
 
               <View style={styles.configSection}>
@@ -1214,10 +1215,17 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
+    color: '#111',
     marginBottom: 16,
   },
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#111',
+    marginBottom: 4,
+  },
   input: {
-    marginBottom: 12,
+    marginBottom: 13,
   },
   modalButtons: {
     flexDirection: 'row',
@@ -1229,16 +1237,17 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   detalheItem: {
-    marginBottom: 12,
+    marginBottom: 13,
   },
   detalheLabel: {
     fontSize: 14,
-    color: '#666',
+    color: '#111',
     marginBottom: 4,
   },
   detalheValor: {
     fontSize: 16,
     fontWeight: '500',
+    color: '#111',
   },
   estoqueValor: {
     fontSize: 20,
@@ -1275,11 +1284,13 @@ const styles = StyleSheet.create({
   configTitulo: {
     fontSize: 16,
     fontWeight: 'bold',
+    color: '#111',
     marginBottom: 8,
   },
   configLabel: {
     fontSize: 13,
-    color: '#666',
+    fontWeight: '600',
+    color: '#111',
     marginTop: 8,
     marginBottom: 4,
   },
@@ -1291,9 +1302,20 @@ const styles = StyleSheet.create({
     marginRight: 6,
     marginBottom: 6,
   },
+  categoryPickerWrap: {
+    backgroundColor: '#fff',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  categoryPicker: {
+    color: '#111',
+  },
   configVazio: {
     fontSize: 12,
-    color: '#999',
+    color: '#555',
     fontStyle: 'italic',
   },
   salvarConfigButton: {
@@ -1306,7 +1328,7 @@ const styles = StyleSheet.create({
   unitPriceNome: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#111',
     marginBottom: 4,
   },
   unitPriceInputs: {
@@ -1336,6 +1358,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     fontWeight: '500',
+    color: '#111',
   },
   crudSubNome: {
     flex: 1,
@@ -1347,7 +1370,7 @@ const styles = StyleSheet.create({
   },
   crudUnitSub: {
     fontSize: 12,
-    color: '#888',
+    color: '#555',
   },
   editandoLabel: {
     fontSize: 14,

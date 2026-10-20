@@ -91,7 +91,7 @@ function OrigemRows({ origens, setOrigens, origensDisponiveis }) {
 
 
 export default function PDVScreen({ navigation }) {
-  const { user, signOut } = useAuth();
+  const { user, requestSignOut } = useAuth();
   const [produtos, setProdutos] = useState([]);
   const [estoqueCompleto, setEstoqueCompleto] = useState([]);
   const [equivMap, setEquivMap] = useState({});
@@ -1795,7 +1795,7 @@ export default function PDVScreen({ navigation }) {
           <Appbar.Action icon="view-grid" onPress={() => navigation.navigate('Home')} color="#fff" />
         )}
         {!navigation.canGoBack() && (
-          <Appbar.Action icon="logout" onPress={signOut} color="#fff" />
+          <Appbar.Action icon="logout" onPress={requestSignOut} color="#fff" />
         )}
       </Appbar.Header>
 

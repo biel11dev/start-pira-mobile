@@ -361,16 +361,16 @@ export default function EstoqueScreen({ navigation }) {
   };
 
   // ===== Conversão manual =====
-  const abrirConversao = (item) => {
-    setConvItem(item);
-    setConvModo('base');
-    setConvQuantidade('');
-    setConvUnidadeAlvo('');
-    setConvDoseUnidade('');
-    setConvDoseRendimento('');
-    setConvDoseValor('');
-    setConvVisible(true);
-  };
+  // const abrirConversao = (item) => {
+  //   setConvItem(item);
+  //   setConvModo('base');
+  //   setConvQuantidade('');
+  //   setConvUnidadeAlvo('');
+  //   setConvDoseUnidade('');
+  //   setConvDoseRendimento('');
+  //   setConvDoseValor('');
+  //   setConvVisible(true);
+  // };
 
   const confirmarConversao = async () => {
     if (!convItem || !convQuantidade) {
@@ -882,7 +882,7 @@ export default function EstoqueScreen({ navigation }) {
                           >
                             Ideal
                           </Button>
-                          <Button
+                          {/* <Button
                             compact
                             mode="text"
                             icon="swap-horizontal"
@@ -890,7 +890,7 @@ export default function EstoqueScreen({ navigation }) {
                             onPress={() => abrirConversao(produto)}
                           >
                             Conversão
-                          </Button>
+                          </Button> */}
                           <Button
                             compact
                             mode={produto.isCombo ? 'contained-tonal' : 'text'}

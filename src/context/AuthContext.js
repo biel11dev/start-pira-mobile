@@ -1,4 +1,5 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
+import { Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
 
@@ -122,6 +123,41 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // Registra o logout no servidor (best-effort) e encerra a sessão local.
+  const finalizarSaida = async () => {
+    try {
+      await api.post('/api/logout', null, { timeout: 8000 });
+    } catch (error) {
+      console.warn('Falha ao registrar logout no servidor:', error.message);
+    }
+    await signOut();
+  };
+
+  // Com ponto automático habilitado, pede confirmação do horário antes de sair.
+  const requestSignOut = async () => {
+    let status = null;
+    try {
+      const res = await api.get('/api/ponto-auto/status', { timeout: 8000 });
+      status = res.data;
+    } catch (error) {
+      console.warn('Falha ao consultar ponto automático:', error.message);
+    }
+
+    if (!status?.autoPonto) {
+      await finalizarSaida();
+      return;
+    }
+
+    Alert.alert(
+      'Confirmar saída',
+      `Você está saindo às ${status.exitTime}. Confirmar? Esse horário será registrado como sua saída no ponto.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Confirmar', onPress: finalizarSaida },
+      ]
+    );
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -130,6 +166,7 @@ export const AuthProvider = ({ children }) => {
         loading,
         signIn,
         signOut,
+        requestSignOut,
       }}
     >
       {children}
