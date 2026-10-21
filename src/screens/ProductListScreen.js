@@ -484,7 +484,7 @@ export default function ProductListScreen({ navigation }) {
           style={styles.searchBar}
         />
 
-        <ScrollView style={styles.lista}>
+        <ScrollView style={styles.lista} contentContainerStyle={styles.listaConteudo}>
           {produtosFiltrados.length === 0 ? (
             <Text style={styles.semDados}>Nenhum produto cadastrado</Text>
           ) : (
@@ -1153,6 +1153,9 @@ const styles = StyleSheet.create({
   },
   lista: {
     flex: 1,
+  },
+  listaConteudo: {
+    paddingBottom: 96, // espaço para o FAB não cobrir o último item
   },
   semDados: {
     textAlign: 'center',
