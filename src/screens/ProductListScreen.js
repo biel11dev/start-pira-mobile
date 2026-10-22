@@ -34,6 +34,20 @@ function TextInput({ label, style, ...props }) {
   );
 }
 
+// Valores de venda/custo por unidade comercializável (o valor do produto pode ser 0 quando só há preço por unidade).
+function precosPorUnidade(produto) {
+  const up = produto?.unitPrices && typeof produto.unitPrices === 'object' ? produto.unitPrices : {};
+  return Object.entries(up).filter(([, cfg]) => cfg && (cfg.value != null || cfg.cost != null));
+}
+
+function precoExibicao(produto) {
+  const base = Number(produto.value) || 0;
+  if (base > 0) return base;
+  const entradas = precosPorUnidade(produto);
+  const entrada = entradas.find(([u]) => u === produto.unit) || entradas.find(([, cfg]) => cfg.value != null);
+  return entrada && entrada[1].value != null ? entrada[1].value : base;
+}
+
 export default function ProductListScreen({ navigation }) {
   const [produtos, setProdutos] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
@@ -49,8 +63,6 @@ export default function ProductListScreen({ navigation }) {
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [unitProduto, setUnitProduto] = useState('Unidade');
   const [baseUnitProduto, setBaseUnitProduto] = useState(null);
-  const [unitProdutoFiltro, setUnitProdutoFiltro] = useState('');
-  const [unitBaseFiltro, setUnitBaseFiltro] = useState('');
 
   // Categorias
   const [categorias, setCategorias] = useState([]);
@@ -318,8 +330,6 @@ export default function ProductListScreen({ navigation }) {
     setSelectedCategoryId(null);
     setUnitProduto('Unidade');
     setBaseUnitProduto(null);
-    setUnitProdutoFiltro('');
-    setUnitBaseFiltro('');
     setUnitPricesEdit({});
     setProdutoSelecionado(null);
   };
@@ -510,10 +520,21 @@ export default function ProductListScreen({ navigation }) {
                     </View>
                     <View style={styles.produtoPrecoContainer}>
                       <Text style={styles.produtoPreco}>
-                        R$ {formatarValor(produto.value)}
+                        R$ {formatarValor(precoExibicao(produto))}
                       </Text>
                     </View>
                   </View>
+
+                  {precosPorUnidade(produto).length > 0 && (
+                    <View style={styles.produtoUnidades}>
+                      {precosPorUnidade(produto).map(([u, cfg]) => (
+                        <Text key={u} style={styles.produtoUnidadeLinha}>
+                          <Text style={styles.produtoUnidadeNome}>{u}</Text>
+                          {'  '}V: R$ {formatarValor(cfg.value ?? produto.value)} · C: R$ {formatarValor(cfg.cost ?? produto.valuecusto)}
+                        </Text>
+                      ))}
+                    </View>
+                  )}
 
                   <View style={styles.produtoFooter}>
                     <Chip
@@ -577,58 +598,34 @@ export default function ProductListScreen({ navigation }) {
             />
 
             <Text style={styles.configLabel}>Unidade de Medida:</Text>
-            <TextInput
-              label="Buscar unidade"
-              value={unitProdutoFiltro}
-              onChangeText={setUnitProdutoFiltro}
-              mode="outlined"
-              dense
-              style={styles.input}
-            />
-            <View style={styles.configChips}>
-              {unidadesOpcoes()
-                .filter((u) => u.toLowerCase().includes(unitProdutoFiltro.toLowerCase()))
-                .map((u) => (
-                <Chip
-                  key={u}
-                  selected={unitProduto === u}
-                  onPress={() => setUnitProduto(u)}
-                  style={styles.configChip}
-                >
-                  {u}
-                </Chip>
-              ))}
+            <View style={styles.categoryPickerWrap}>
+              <Picker
+                selectedValue={unitProduto}
+                onValueChange={(value) => setUnitProduto(value)}
+                dropdownIconColor="#333"
+                mode="dropdown"
+                style={styles.categoryPicker}
+              >
+                {unidadesOpcoes().map((u) => (
+                  <Picker.Item key={u} label={u} value={u} color="#111" />
+                ))}
+              </Picker>
             </View>
 
             <Text style={styles.configLabel}>Unidade base (conversão):</Text>
-            <TextInput
-              label="Buscar unidade"
-              value={unitBaseFiltro}
-              onChangeText={setUnitBaseFiltro}
-              mode="outlined"
-              dense
-              style={styles.input}
-            />
-            <View style={styles.configChips}>
-              <Chip
-                selected={!baseUnitProduto}
-                onPress={() => setBaseUnitProduto(null)}
-                style={styles.configChip}
+            <View style={styles.categoryPickerWrap}>
+              <Picker
+                selectedValue={baseUnitProduto ?? ''}
+                onValueChange={(value) => setBaseUnitProduto(value === '' ? null : value)}
+                dropdownIconColor="#333"
+                mode="dropdown"
+                style={styles.categoryPicker}
               >
-                Automática
-              </Chip>
-              {unidadesOpcoes()
-                .filter((u) => u.toLowerCase().includes(unitBaseFiltro.toLowerCase()))
-                .map((u) => (
-                <Chip
-                  key={u}
-                  selected={baseUnitProduto === u}
-                  onPress={() => setBaseUnitProduto(u)}
-                  style={styles.configChip}
-                >
-                  {u}
-                </Chip>
-              ))}
+                <Picker.Item label="Automática" value="" color="#111" />
+                {unidadesOpcoes().map((u) => (
+                  <Picker.Item key={u} label={u} value={u} color="#111" />
+                ))}
+              </Picker>
             </View>
 
             <Text style={styles.configLabel}>Categoria:</Text>
@@ -746,24 +743,19 @@ export default function ProductListScreen({ navigation }) {
                 <Text style={styles.configTitulo}>Configurações do PDV</Text>
 
                 <Text style={styles.configLabel}>Unidade base (conversão):</Text>
-                <View style={styles.configChips}>
-                  <Chip
-                    selected={!baseUnitEdit}
-                    onPress={() => setBaseUnitEdit(null)}
-                    style={styles.configChip}
+                <View style={styles.categoryPickerWrap}>
+                  <Picker
+                    selectedValue={baseUnitEdit ?? ''}
+                    onValueChange={(value) => setBaseUnitEdit(value === '' ? null : value)}
+                    dropdownIconColor="#333"
+                    mode="dropdown"
+                    style={styles.categoryPicker}
                   >
-                    Automático
-                  </Chip>
-                  {unidadesDoProduto(produtoSelecionado).map((u) => (
-                    <Chip
-                      key={u}
-                      selected={baseUnitEdit === u}
-                      onPress={() => setBaseUnitEdit(u)}
-                      style={styles.configChip}
-                    >
-                      {u}
-                    </Chip>
-                  ))}
+                    <Picker.Item label="Automático" value="" color="#111" />
+                    {unidadesDoProduto(produtoSelecionado).map((u) => (
+                      <Picker.Item key={u} label={u} value={u} color="#111" />
+                    ))}
+                  </Picker>
                 </View>
 
                 <Text style={styles.configLabel}>Unidades visíveis no PDV:</Text>
@@ -1195,6 +1187,18 @@ const styles = StyleSheet.create({
   produtoFooter: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  produtoUnidades: {
+    marginBottom: 10,
+  },
+  produtoUnidadeLinha: {
+    fontSize: 12,
+    color: '#bbb',
+    marginBottom: 2,
+  },
+  produtoUnidadeNome: {
+    fontWeight: 'bold',
+    color: '#ddd',
   },
   estoqueChip: {
     backgroundColor: '#E3F2FD',

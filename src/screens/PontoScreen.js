@@ -23,6 +23,14 @@ import api from '../services/api';
 import { formatarValor } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
 
+// "YYYY-MM-DD HH:mm" (horário de Brasília vindo da API) -> "DD/MM/YYYY HH:mm"
+function formatarUltimoLogin(local) {
+  if (!local) return 'sem registro';
+  const [data, hora] = String(local).split(' ');
+  const [ano, mes, dia] = data.split('-');
+  return `${dia}/${mes}/${ano} ${hora}`;
+}
+
 export default function PontoScreen({ navigation }) {
   const { user } = useAuth();
   const isAdmin = user?.permissions?.acessos === true;
@@ -1557,7 +1565,14 @@ export default function PontoScreen({ navigation }) {
             {isAdmin && (
               <>
                 <View style={styles.funcAtivoRow}>
-                  <Text style={styles.funcFieldLabel}>Ponto automático</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.funcFieldLabel}>Ponto automático</Text>
+                    {funcEditando && (
+                      <Text style={styles.gastoVazio}>
+                        Último login: {formatarUltimoLogin(funcEditando.ultimoLoginLocal)}
+                      </Text>
+                    )}
+                  </View>
                   <Switch
                     value={funcForm.autoPonto}
                     onValueChange={(v) => setFuncField('autoPonto', v)}
