@@ -677,7 +677,7 @@ export default function EstoqueScreen({ navigation }) {
   const abrirCombo = (item) => {
     setComboItem(item);
     setComboAtivo(!!item.isCombo);
-    setComboNome(item.comboNome || item.unit || 'Combo');
+    setComboNome(item.comboNome || item.unit || 'COMBO');
     setComboVisible(true);
   };
 
@@ -687,7 +687,7 @@ export default function EstoqueScreen({ navigation }) {
     try {
       await api.patch(`/api/estoque_prod/${comboItem.id}/combo`, {
         isCombo: comboAtivo,
-        comboNome: comboAtivo ? comboNome.trim() || 'Combo' : null,
+        comboNome: comboAtivo ? comboNome.trim() || 'COMBO' : null,
       });
       Alert.alert(
         'Sucesso',
@@ -849,7 +849,7 @@ export default function EstoqueScreen({ navigation }) {
                             style={[styles.estoqueChip, emFalta ? styles.estoqueBaixo : {}]}
                             textStyle={{ color: emFalta ? '#FF5722' : '#2196F3' }}
                           >
-                            {produto.quantity} {produto.isCombo ? produto.comboNome || 'Combo' : produto.unit}
+                            {produto.quantity} {produto.isCombo ? produto.comboNome || 'COMBO' : produto.unit}
                           </Chip>
                         </View>
 
@@ -898,7 +898,7 @@ export default function EstoqueScreen({ navigation }) {
                             textColor={produto.isCombo ? '#CE93D8' : '#777'}
                             onPress={() => abrirCombo(produto)}
                           >
-                            {produto.isCombo ? produto.comboNome || 'Combo' : 'Variação'}
+                            {produto.isCombo ? produto.comboNome || 'COMBO' : 'Variação'}
                           </Button>
                           <Button
                             compact

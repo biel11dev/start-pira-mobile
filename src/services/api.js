@@ -1,6 +1,7 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from '../config/environment';
+import { normalizarCorpo } from '../utils/normalizarEntrada';
 
 // Criar instância do axios
 const api = axios.create({
@@ -16,6 +17,7 @@ const api = axios.create({
 // Interceptor para adicionar token nas requisições
 api.interceptors.request.use(
   async (config) => {
+    config.data = normalizarCorpo(config.method, config.url, config.data);
     console.log('🌐 [API] Requisição:', {
       method: config.method?.toUpperCase(),
       url: config.baseURL + config.url,

@@ -61,7 +61,7 @@ export default function ProductListScreen({ navigation }) {
   const [preco, setPreco] = useState('');
   const [precoCusto, setPrecoCusto] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
-  const [unitProduto, setUnitProduto] = useState('Unidade');
+  const [unitProduto, setUnitProduto] = useState('UNIDADE');
   const [baseUnitProduto, setBaseUnitProduto] = useState(null);
 
   // Categorias
@@ -134,9 +134,9 @@ export default function ProductListScreen({ navigation }) {
     return out;
   };
 
-  // Opções de unidade de medida (sempre inclui "Unidade" + equivalências cadastradas)
+  // Opções de unidade de medida (sempre inclui "UNIDADE" + equivalências cadastradas)
   const unidadesOpcoes = () => {
-    const nomes = ['Unidade', ...(unidades || []).map((u) => u.unitName)];
+    const nomes = ['UNIDADE', ...(unidades || []).map((u) => u.unitName)];
     return [...new Set(nomes.filter(Boolean))];
   };
 
@@ -150,7 +150,7 @@ export default function ProductListScreen({ navigation }) {
     try {
       await api.post('/api/products', {
         name: nomeProduto,
-        unit: unitProduto || 'Unidade',
+        unit: unitProduto || 'UNIDADE',
         value: parseFloat(preco),
         valuecusto: parseFloat(precoCusto),
         categoryId: selectedCategoryId,
@@ -328,7 +328,7 @@ export default function ProductListScreen({ navigation }) {
     setPreco('');
     setPrecoCusto('');
     setSelectedCategoryId(null);
-    setUnitProduto('Unidade');
+    setUnitProduto('UNIDADE');
     setBaseUnitProduto(null);
     setUnitPricesEdit({});
     setProdutoSelecionado(null);
