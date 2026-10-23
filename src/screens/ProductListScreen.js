@@ -607,7 +607,7 @@ export default function ProductListScreen({ navigation }) {
                 style={styles.categoryPicker}
               >
                 {unidadesOpcoes().map((u) => (
-                  <Picker.Item key={u} label={u} value={u} color="#111" />
+                  <Picker.Item key={u} label={u} value={u} style={styles.pickerItem} />
                 ))}
               </Picker>
             </View>
@@ -621,9 +621,9 @@ export default function ProductListScreen({ navigation }) {
                 mode="dropdown"
                 style={styles.categoryPicker}
               >
-                <Picker.Item label="Automática" value="" color="#111" />
+                <Picker.Item label="Automática" value="" style={styles.pickerItem} />
                 {unidadesOpcoes().map((u) => (
-                  <Picker.Item key={u} label={u} value={u} color="#111" />
+                  <Picker.Item key={u} label={u} value={u} style={styles.pickerItem} />
                 ))}
               </Picker>
             </View>
@@ -637,9 +637,9 @@ export default function ProductListScreen({ navigation }) {
                 mode="dropdown"
                 style={styles.categoryPicker}
               >
-                <Picker.Item label="Sem categoria" value="" color="#111" />
+                <Picker.Item label="Sem categoria" value="" style={styles.pickerItem} />
                 {categoriasFlat().map((c) => (
-                  <Picker.Item key={c.id} label={c.name} value={c.id} color="#111" />
+                  <Picker.Item key={c.id} label={c.name} value={c.id} style={styles.pickerItem} />
                 ))}
               </Picker>
             </View>
@@ -732,9 +732,9 @@ export default function ProductListScreen({ navigation }) {
                     mode="dropdown"
                     style={styles.categoryPicker}
                   >
-                    <Picker.Item label="Sem categoria" value="" color="#111" />
+                    <Picker.Item label="Sem categoria" value="" style={styles.pickerItem} />
                     {categoriasFlat().map((c) => (
-                      <Picker.Item key={c.id} label={c.name} value={c.id} color="#111" />
+                      <Picker.Item key={c.id} label={c.name} value={c.id} style={styles.pickerItem} />
                     ))}
                   </Picker>
                 </View>
@@ -751,9 +751,9 @@ export default function ProductListScreen({ navigation }) {
                     mode="dropdown"
                     style={styles.categoryPicker}
                   >
-                    <Picker.Item label="Automático" value="" color="#111" />
+                    <Picker.Item label="Automático" value="" style={styles.pickerItem} />
                     {unidadesDoProduto(produtoSelecionado).map((u) => (
-                      <Picker.Item key={u} label={u} value={u} color="#111" />
+                      <Picker.Item key={u} label={u} value={u} style={styles.pickerItem} />
                     ))}
                   </Picker>
                 </View>
@@ -1318,6 +1318,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   categoryPicker: {
+    color: '#111',
+  },
+  pickerItem: {
+    backgroundColor: '#fff',
     color: '#111',
   },
   configVazio: {
